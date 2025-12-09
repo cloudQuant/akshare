@@ -7,11 +7,182 @@ Desc: 债券-集思录-可转债
 """
 
 from io import StringIO
+import json
+import re
 import pandas as pd
 import requests
 import time
 
 from akshare.utils import demjson
+
+
+def _update_jsl_cookie(cookie: str) -> str:
+    """
+    动态更新集思录 cookie 中的时间戳字段，避免过期
+    :param cookie: 原始 cookie 字符串
+    :return: 更新后的 cookie 字符串
+    """
+    if not cookie:
+        return cookie
+    
+    current_ts = int(time.time())
+    
+    # 更新 Hm_lpvt_* (最后访问时间戳)
+    cookie = re.sub(
+        r'(Hm_lpvt_[a-f0-9]+)=\d+',
+        rf'\1={current_ts}',
+        cookie
+    )
+    
+    # 更新 SERVERID 中间的时间戳: hash|current_ts|first_ts
+    def update_serverid(match):
+        parts = match.group(1).split('|')
+        if len(parts) == 3:
+            parts[1] = str(current_ts)
+            return f"SERVERID={'|'.join(parts)}"
+        return match.group(0)
+    
+    cookie = re.sub(r'SERVERID=([^;]+)', update_serverid, cookie)
+    
+    return cookie
+
+
+def _jsl_fetch_with_playwright(user: str, password: str) -> list:
+    """
+    使用 Playwright 模拟浏览器登录集思录并获取可转债数据
+    :param user: 用户名/手机号
+    :param password: 密码
+    :return: 可转债数据行列表
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise ImportError(
+            "使用用户名密码登录需要安装 playwright，请执行:\n"
+            "pip install playwright\n"
+            "playwright install chromium"
+        )
+    
+    all_rows = []
+    
+    with sync_playwright() as p:
+        # 启动浏览器（无头模式）
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
+        
+        try:
+            # 1. 访问登录页面
+            page.goto("https://www.jisilu.cn/account/login/", timeout=30000)
+            page.wait_for_load_state("networkidle")
+            time.sleep(1)
+            
+            # 2. 填写登录表单 - 使用正确的选择器
+            # 定位到账号密码登录表单中的输入框（第一个表单）
+            user_input = page.locator('input[name="user_name"][placeholder="手机号/用户名"]')
+            user_input.fill(user)
+            
+            # 密码输入框（账号密码登录表单中的）
+            pwd_input = page.locator('input[name="password"][placeholder="密码"]')
+            pwd_input.fill(password)
+            
+            # 勾选"同意用户协议"等复选框（如果存在且未勾选）
+            checkboxes = page.locator('input[type="checkbox"]').all()
+            for cb in checkboxes:
+                if cb.is_visible() and not cb.is_checked():
+                    cb.check()
+            
+            # 3. 点击登录按钮 - 使用文本匹配（注意：是 .btn 而非 button）
+            login_btn = page.locator('.btn:has-text("登录")').first
+            login_btn.click()
+            
+            # 4. 等待登录完成
+            time.sleep(5)  # 给足够时间完成登录和跳转
+            page.wait_for_load_state("networkidle", timeout=15000)
+            
+            # 5. 访问可转债数据页面
+            page.goto("https://www.jisilu.cn/data/cbnew/#cb", timeout=30000)
+            page.wait_for_load_state("networkidle")
+            time.sleep(2)  # 等待数据加载
+            
+            # 6. 使用浏览器内的 fetch 发起 API 请求获取所有数据
+            api_url = "https://www.jisilu.cn/data/cbnew/cb_list_new/"
+            
+            # 分页获取数据
+            page_num = 1
+            while True:
+                # 构造请求参数
+                ts = int(time.time() * 1000)
+                
+                # 使用 page.evaluate 发起 fetch 请求
+                response_text = page.evaluate(f"""
+                    async () => {{
+                        const formData = new URLSearchParams();
+                        formData.append('fprice', '');
+                        formData.append('tprice', '');
+                        formData.append('curr_iss_amt', '');
+                        formData.append('volume', '');
+                        formData.append('svolume', '');
+                        formData.append('premium_rt', '');
+                        formData.append('ytm_rt', '');
+                        formData.append('market', '');
+                        formData.append('rating_cd', '');
+                        formData.append('is_search', 'N');
+                        formData.append('market_cd[]', 'shmb');
+                        formData.append('market_cd[]', 'shkc');
+                        formData.append('market_cd[]', 'szmb');
+                        formData.append('market_cd[]', 'szcy');
+                        formData.append('btype', '');
+                        formData.append('listed', 'Y');
+                        formData.append('qflag', 'N');
+                        formData.append('sw_cd', '');
+                        formData.append('bond_ids', '');
+                        formData.append('rp', '500');
+                        formData.append('page', '{page_num}');
+                        
+                        const response = await fetch("{api_url}?___jsl=LST___t={ts}", {{
+                            method: "POST",
+                            headers: {{
+                                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                                "X-Requested-With": "XMLHttpRequest"
+                            }},
+                            body: formData.toString()
+                        }});
+                        return await response.text();
+                    }}
+                """)
+                
+                data_json = json.loads(response_text)
+                rows = data_json.get("rows", [])
+                
+                if not rows:
+                    break
+                    
+                all_rows.extend(rows)
+                
+                # 检查是否获取完所有数据
+                total_count = data_json.get("total", 0)
+                all_count = data_json.get("all", 0)
+                
+                # 如果有警告说明登录失败
+                warn_msg = data_json.get("warn")
+                if warn_msg and all_count > len(all_rows):
+                    print(f"警告: {warn_msg}")
+                    print("登录可能失败，请检查用户名和密码是否正确。")
+                    break
+                
+                if len(all_rows) >= total_count:
+                    break
+                    
+                page_num += 1
+                
+        finally:
+            browser.close()
+    
+    return all_rows
 
 
 def bond_cb_index_jsl() -> pd.DataFrame:
@@ -28,64 +199,107 @@ def bond_cb_index_jsl() -> pd.DataFrame:
     return temp_df
 
 
-def bond_cb_jsl(cookie: str = None) -> pd.DataFrame:
+def bond_cb_jsl(
+    cookie: str = None,
+    user: str = None,
+    password: str = None
+) -> pd.DataFrame:
     """
     集思录可转债
     https://www.jisilu.cn/data/cbnew/#cb
-    :param cookie: 输入获取到的游览器 cookie
+    :param cookie: 输入获取到的游览器 cookie（与 user/password 二选一）
     :type cookie: str
+    :param user: 集思录用户名/手机号（与 cookie 二选一，需配合 password 使用）
+    :type user: str
+    :param password: 集思录密码（与 cookie 二选一，需配合 user 使用）
+    :type password: str
     :return: 集思录可转债
     :rtype: pandas.DataFrame
     """
-    url = "https://www.jisilu.cn/data/cbnew/cb_list_new/"
-    headers = {
-        "accept": "application/json, text/javascript, */*; q=0.01",
-        "accept-encoding": "gzip, deflate, br",
-        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "cache-control": "no-cache",
-        "content-length": "220",
-        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "cookie": cookie,
-        "origin": "https://www.jisilu.cn",
-        "pragma": "no-cache",
-        "referer": "https://www.jisilu.cn/data/cbnew/",
-        "sec-ch-ua": '" Not;A Brand";v="99", "Google Chrome";v="91", "Chromium";v="91"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/91.0.4472.164 Safari/537.36",
-        "x-requested-with": "XMLHttpRequest",
-    }
-    params = {
-        "___jsl": f"LST___t={int(time.time() * 1000)}",
-    }
-    payload = {
-        "fprice": "",
-        "tprice": "",
-        "curr_iss_amt": "",
-        "volume": "",
-        "svolume": "",
-        "premium_rt": "",
-        "ytm_rt": "",
-        "market": "",
-        "rating_cd": "",
-        "is_search": "N",
-        "market_cd[]": "shmb",  # noqa: F601
-        "market_cd[]": "shkc",  # noqa: F601
-        "market_cd[]": "szmb",  # noqa: F601
-        "market_cd[]": "szcy",  # noqa: F601
-        "btype": "",
-        "listed": "Y",
-        "qflag": "N",
-        "sw_cd": "",
-        "bond_ids": "",
-        "rp": "50",
-    }
-    r = requests.post(url, params=params, json=payload, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item["cell"] for item in data_json["rows"]])
+    # 如果提供了用户名和密码，使用 Playwright 方式获取数据
+    if user and password:
+        all_rows = _jsl_fetch_with_playwright(user, password)
+    else:
+        # 使用 cookie 方式获取数据
+        url = "https://www.jisilu.cn/data/cbnew/cb_list_new/"
+        # 动态更新 cookie 中的时间戳，避免过期
+        updated_cookie = _update_jsl_cookie(cookie)
+        headers = {
+            "accept": "application/json, text/javascript, */*; q=0.01",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "cache-control": "no-cache",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "cookie": updated_cookie,
+            "origin": "https://www.jisilu.cn",
+            "pragma": "no-cache",
+            "referer": "https://www.jisilu.cn/data/cbnew/",
+            "sec-ch-ua": '" Not;A Brand";v="99", "Google Chrome";v="91", "Chromium";v="91"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/91.0.4472.164 Safari/537.36",
+            "x-requested-with": "XMLHttpRequest",
+        }
+        params = {
+            "___jsl": f"LST___t={int(time.time() * 1000)}",
+        }
+        # 使用列表形式的 payload 以支持重复键 market_cd[]
+        payload = [
+            ("fprice", ""),
+            ("tprice", ""),
+            ("curr_iss_amt", ""),
+            ("volume", ""),
+            ("svolume", ""),
+            ("premium_rt", ""),
+            ("ytm_rt", ""),
+            ("market", ""),
+            ("rating_cd", ""),
+            ("is_search", "N"),
+            ("market_cd[]", "shmb"),
+            ("market_cd[]", "shkc"),
+            ("market_cd[]", "szmb"),
+            ("market_cd[]", "szcy"),
+            ("btype", ""),
+            ("listed", "Y"),
+            ("qflag", "N"),
+            ("sw_cd", ""),
+            ("bond_ids", ""),
+            ("rp", "5000"),
+        ]
+        # 分页获取所有数据
+        all_rows = []
+        page = 1
+        while True:
+            page_payload = payload + [("page", str(page))]
+            r = requests.post(url, params=params, data=page_payload, headers=headers)
+            data_json = r.json()
+            rows = data_json.get("rows", [])
+            if not rows:
+                break
+            all_rows.extend(rows)
+            # 检查是否有登录限制警告
+            warn_msg = data_json.get("warn")
+            all_count = data_json.get("all", 0)
+            if warn_msg and all_count > len(all_rows):
+                print(f"警告: {warn_msg}")
+                print(f"提示: 总共有 {all_count} 条数据，当前仅获取 {len(all_rows)} 条。")
+                print("原因: 登录凭证(kbz__user_login)已在服务器端过期。")
+                print("解决: 请使用 user 和 password 参数自动登录，或重新获取 cookie。")
+                break
+            # 检查是否还有更多数据
+            total_count = data_json.get("total", 0)
+            if len(all_rows) >= total_count:
+                break
+            page += 1
+    
+    # 处理返回数据
+    if not all_rows:
+        return pd.DataFrame()
+    
+    temp_df = pd.DataFrame([item["cell"] for item in all_rows])
     temp_df.rename(
         columns={
             "bond_id": "代码",
@@ -331,14 +545,41 @@ def bond_cb_adj_logs_jsl(symbol: str = "128013") -> pd.DataFrame:
 
 
 if __name__ == "__main__":
+    # 测试1：集思录可转债等权指数
+    print("=" * 60)
+    print("测试1：集思录可转债等权指数")
+    print("=" * 60)
     bond_cb_index_jsl_df = bond_cb_index_jsl()
     print(bond_cb_index_jsl_df)
 
-    bond_cb_jsl_df = bond_cb_jsl(cookie="")
-    print(bond_cb_jsl_df)
+    # 测试2：使用 Playwright 登录获取可转债数据（推荐方式）
+    print("\n" + "=" * 60)
+    print("测试2：使用 Playwright 登录获取集思录可转债数据")
+    print("=" * 60)
+    # 使用用户名密码登录
+    bond_cb_jsl_df = bond_cb_jsl(
+        user="13718729810",
+        password="fsXkFu6Ef25vWNc"
+    )
+    print(f"获取到 {len(bond_cb_jsl_df)} 条数据")
+    print(bond_cb_jsl_df.head())
+    
+    # 验证数据完整性
+    if len(bond_cb_jsl_df) > 30:
+        print(f"\n✓ Playwright 登录测试通过！获取 {len(bond_cb_jsl_df)} 条数据")
+    else:
+        print(f"\n✗ 测试失败，只获取 {len(bond_cb_jsl_df)} 条数据")
 
+    # 测试3：集思录可转债强赎
+    print("\n" + "=" * 60)
+    print("测试3：集思录可转债强赎")
+    print("=" * 60)
     bond_cb_redeem_jsl_df = bond_cb_redeem_jsl()
     print(bond_cb_redeem_jsl_df)
 
+    # 测试4：转股价调整记录
+    print("\n" + "=" * 60)
+    print("测试4：转股价调整记录")
+    print("=" * 60)
     bond_cb_adj_logs_jsl_df = bond_cb_adj_logs_jsl(symbol="128013")
     print(bond_cb_adj_logs_jsl_df)
