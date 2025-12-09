@@ -24,7 +24,7 @@ def __get_99_symbol_map() -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     url = "https://www.99qh.com/data/stockIn"
-    r = requests.get(url)
+    r = requests.get(url, verify=False)
     soup = BeautifulSoup(r.text, features="lxml")
     raw_data = soup.find(attrs={"id": "__NEXT_DATA__"}).text
     data_json = json.loads(raw_data)
