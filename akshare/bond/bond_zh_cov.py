@@ -282,7 +282,23 @@ def bond_zh_hs_cov_pre_min(symbol: str = "sh113570") -> pd.DataFrame:
     }
     r = requests.get(url, params=params)
     data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["trends"]])
+    if not data_json.get("data") or not data_json["data"].get("trends"):
+        temp_df = pd.DataFrame(
+            columns=[
+                "时间",
+                "开盘",
+                "收盘",
+                "最高",
+                "最低",
+                "成交量",
+                "成交额",
+                "最新价",
+            ]
+        )
+        return temp_df
+    temp_df = pd.DataFrame(
+        [item.split(",") for item in data_json["data"]["trends"]]
+    )
     temp_df.columns = [
         "时间",
         "开盘",
