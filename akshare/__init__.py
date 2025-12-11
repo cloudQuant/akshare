@@ -5690,6 +5690,7 @@ from akshare.futures.futures_inventory_99 import futures_inventory_99
 东方财富-期货库存数据
 """
 from akshare.futures.futures_inventory_em import futures_inventory_em
+from akshare.futures.futures_inventory_em_varieties import futures_inventory_em_varieties
 
 """
 中国银行间市场交易商协会
