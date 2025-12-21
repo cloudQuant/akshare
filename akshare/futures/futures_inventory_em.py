@@ -11,7 +11,7 @@ import requests
 from akshare.futures.cons import futures_inventory_em_symbol_dict
 
 
-def futures_inventory_em(symbol: str = "a") -> pd.DataFrame:
+def futures_inventory_em(symbol: str = "A") -> pd.DataFrame:
     """
     东方财富网-数据中心-期货库存数据
     https://data.eastmoney.com/ifdata/kcsj.html
@@ -34,12 +34,23 @@ def futures_inventory_em(symbol: str = "a") -> pd.DataFrame:
     data_json = r.json()
     temp_df = pd.DataFrame(data_json["result"]["data"])
     symbol_dict = dict(zip(temp_df["TRADE_TYPE"], temp_df["TRADE_CODE"]))
-    if symbol in symbol_dict.keys():
-        product_id = symbol_dict[symbol]
-    elif symbol in futures_inventory_em_symbol_dict.keys():  # 如果输入的是代码
-        product_id = futures_inventory_em_symbol_dict[symbol]
+    symbol_clean = symbol.strip()
+    symbol_code_map = {
+        key.lower(): value
+        for key, value in futures_inventory_em_symbol_dict.items()
+        if value
+    }
+    if symbol_clean in symbol_dict:
+        product_id = symbol_dict[symbol_clean]
+    elif symbol_clean.lower() in symbol_code_map:  # 如果输入的是代码
+        product_id = symbol_code_map[symbol_clean.lower()]
     else:
-        raise ValueError(f"请输入正确的 symbol, 可选项为: {symbol_dict}")
+        valid_codes = sorted({k.upper() for k in symbol_code_map.keys()})
+        raise ValueError(
+            f"请输入正确的 symbol, "
+            f"中文名称可选项为: {list(symbol_dict.keys())}, "
+            f"代码可选项为: {valid_codes}"
+        )
     params = {
         "reportName": "RPT_FUTU_STOCKDATA",
         "columns": "SECURITY_CODE,TRADE_DATE,ON_WARRANT_NUM,ADDCHANGE",
