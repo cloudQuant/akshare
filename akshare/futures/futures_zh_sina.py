@@ -237,13 +237,16 @@ def futures_zh_spot(
         "Chrome/97.0.4692.71 Safari/537.36",
     }
     r = requests.get(url, headers=headers)
-    data_df = pd.DataFrame(
-        [
-            item.strip().split("=")[1].split(",")
-            for item in r.text.split(";")
-            if item.strip() != ""
-        ]
-    )
+    raw_data = [
+        item.strip().split("=")[1].split(",")
+        for item in r.text.split(";")
+        if item.strip() != "" and "=" in item.strip()
+    ]
+    if not raw_data:
+        return pd.DataFrame()
+    data_df = pd.DataFrame(raw_data)
+    if data_df.empty:
+        return pd.DataFrame()
     data_df.iloc[:, 0] = data_df.iloc[:, 0].str.replace('"', "")
     data_df.iloc[:, -1] = data_df.iloc[:, -1].str.replace('"', "")
     if adjust == "1":
