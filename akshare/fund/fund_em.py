@@ -17,6 +17,7 @@ https://fundf10.eastmoney.com/jjjl_001810.html
 
 import json
 import math
+import re
 import time
 from io import StringIO
 
@@ -27,6 +28,18 @@ import requests
 from akshare.utils import demjson
 from akshare.utils.cons import headers
 from akshare.utils.tqdm import get_tqdm
+
+
+def _js_to_json(js_text: str) -> str:
+    """Convert JavaScript object notation to valid JSON.
+
+    Handles unquoted keys and trailing commas.
+    """
+    # Add quotes around unquoted keys
+    result = re.sub(r'([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)', r'\1"\2"\3', js_text)
+    # Remove trailing commas before ] or }
+    result = re.sub(r',(\s*[}\]])', r'\1', result)
+    return result
 
 
 def fund_purchase_em() -> pd.DataFrame:
@@ -284,9 +297,10 @@ def fund_open_fund_daily_em() -> pd.DataFrame:
         "atfc": "",
         "onlySale": "0",
     }
-    res = requests.get(url, params=params, headers=headers)
+    res = requests.get(url, params=params, headers=headers, timeout=30)
     text_data = res.text
-    data_json = demjson.decode(text_data.strip("var db="))
+    json_text = _js_to_json(text_data.strip("var db="))
+    data_json = json.loads(json_text)
     temp_df = pd.DataFrame(data_json["datas"])
     show_day = data_json["showday"]
     temp_df.columns = [
