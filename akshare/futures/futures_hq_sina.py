@@ -135,19 +135,29 @@ def futures_foreign_commodity_realtime(symbol: Union[str, List[str]]) -> pd.Data
     }
     r = requests.get(url, headers=headers)
     data_text = r.text
-    data_df = pd.DataFrame(
-        [
-            item.strip().split("=")[1].split(",")
-            for item in data_text.split(";")
-            if item.strip() != ""
-        ]
-    )
+    raw_data = [
+        item.strip().split("=")[1].split(",")
+        for item in data_text.split(";")
+        if item.strip() != "" and "=" in item.strip()
+    ]
+    if not raw_data:
+        return pd.DataFrame()
+    
+    data_df = pd.DataFrame(raw_data)
+    if data_df.empty:
+        return pd.DataFrame()
+    
     data_df.iloc[:, 0] = data_df.iloc[:, 0].str.replace('"', "")
     data_df.iloc[:, -1] = data_df.iloc[:, -1].str.replace('"', "")
 
-    # 处理伦敦金 XAU 的情况
-    if len(data_df.columns) == 14:
-        data_df["temp"] = None
+    # 动态处理列数，确保列数匹配
+    expected_columns = 15
+    actual_columns = len(data_df.columns)
+    if actual_columns < expected_columns:
+        for i in range(expected_columns - actual_columns):
+            data_df[f"temp_{i}"] = None
+    elif actual_columns > expected_columns:
+        data_df = data_df.iloc[:, :expected_columns]
 
     data_df.columns = [
         "current_price",
