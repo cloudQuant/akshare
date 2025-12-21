@@ -12,6 +12,33 @@ from typing import Tuple, Dict
 
 import pandas as pd
 import requests
+import ssl
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class SSLAdapter(HTTPAdapter):
+    """自定义SSL适配器，解决SSL握手问题"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _get_ssl_session():
+    """创建带有自定义SSL处理的session"""
+    session = requests.Session()
+    adapter = SSLAdapter()
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
 
 
 def __futures_hist_separate_char_and_numbers_em(symbol: str = "焦煤2506") -> tuple:
@@ -37,17 +64,21 @@ def __fetch_exchange_symbol_raw_em() -> list:
     :rtype: pandas.DataFrame
     """
     url = "https://futsse-static.eastmoney.com/redis"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    session = _get_ssl_session()
     params = {"msgid": "gnweb"}
-    r = requests.get(url, params=params)
+    r = session.get(url, params=params, headers=headers, verify=False, timeout=30)
     data_json = r.json()
     all_exchange_symbol_list = []
     for item in data_json:
         params = {"msgid": str(item["mktid"])}
-        r = requests.get(url, params=params)
+        r = session.get(url, params=params, headers=headers, verify=False, timeout=30)
         inner_data_json = r.json()
         for num in range(1, len(inner_data_json) + 1):
             params = {"msgid": str(item["mktid"]) + f"_{num}"}
-            r = requests.get(url, params=params)
+            r = session.get(url, params=params, headers=headers, verify=False, timeout=30)
             inner_data_json = r.json()
             all_exchange_symbol_list.extend(inner_data_json)
     return all_exchange_symbol_list

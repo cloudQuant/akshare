@@ -13,16 +13,28 @@ import requests
 import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from urllib3.util.ssl_ import create_urllib3_context
 
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-def _get_session_with_retry():
-    """创建带有重试机制的session"""
+class SSLAdapter(HTTPAdapter):
+    """自定义SSL适配器，解决SSL握手问题"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _get_session_with_ssl():
+    """创建带有自定义SSL处理的session"""
     session = requests.Session()
     retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
-    adapter = HTTPAdapter(max_retries=retry)
+    adapter = SSLAdapter(max_retries=retry)
     session.mount('http://', adapter)
     session.mount('https://', adapter)
     return session
@@ -44,7 +56,8 @@ def futures_to_spot_shfe(date: str = "202312") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/100.0.4896.127 Safari/537.36",
     }
-    r = requests.get(url, headers=headers, verify=False, timeout=30)
+    session = _get_session_with_ssl()
+    r = session.get(url, headers=headers, verify=False, timeout=30)
     data_json = r.json()
     temp_df = pd.DataFrame(data_json["ExchangeDelivery"])
     temp_df.columns = [
@@ -298,7 +311,8 @@ def futures_delivery_shfe(date: str = "202312") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/100.0.4896.127 Safari/537.36",
     }
-    r = requests.get(url, headers=headers, verify=False, timeout=30)
+    session = _get_session_with_ssl()
+    r = session.get(url, headers=headers, verify=False, timeout=30)
     r.encoding = "utf-8"
     data_json = r.json()
     temp_df = pd.DataFrame(data_json["o_curdelivery"])
