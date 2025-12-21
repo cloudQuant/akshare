@@ -29,7 +29,6 @@ from akshare.stock.cons import (
 from akshare.utils import demjson
 
 
-@lru_cache()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 

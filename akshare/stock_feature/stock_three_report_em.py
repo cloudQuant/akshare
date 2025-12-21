@@ -18,7 +18,6 @@ from bs4 import BeautifulSoup
 from akshare.utils.tqdm import get_tqdm
 
 
-@lru_cache()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
