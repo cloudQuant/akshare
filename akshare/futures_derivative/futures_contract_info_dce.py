@@ -23,8 +23,20 @@ def futures_contract_info_dce() -> pd.DataFrame:
         "tradeType": "1",
         "varietyId": "all",
     }
-    r = requests.post(url, json=payload)
-    data_json = r.json()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "http://www.dce.com.cn",
+        "Referer": "http://www.dce.com.cn/",
+    }
+    r = requests.post(url, json=payload, headers=headers, timeout=30)
+    if r.status_code != 200 or not r.text.strip():
+        return pd.DataFrame()
+    try:
+        data_json = r.json()
+    except Exception:
+        return pd.DataFrame()
     temp_df = pd.DataFrame(data_json['data'])
     temp_df.rename(columns={
         "contractId": "合约",

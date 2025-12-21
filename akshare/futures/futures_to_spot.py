@@ -6,9 +6,26 @@ Desc: 期货-期转现-交割
 """
 
 from io import StringIO, BytesIO
+import ssl
 
 import pandas as pd
 import requests
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+def _get_session_with_retry():
+    """创建带有重试机制的session"""
+    session = requests.Session()
+    retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
 
 
 def futures_to_spot_shfe(date: str = "202312") -> pd.DataFrame:
@@ -27,7 +44,7 @@ def futures_to_spot_shfe(date: str = "202312") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/100.0.4896.127 Safari/537.36",
     }
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, verify=False, timeout=30)
     data_json = r.json()
     temp_df = pd.DataFrame(data_json["ExchangeDelivery"])
     temp_df.columns = [
@@ -251,7 +268,7 @@ def futures_delivery_czce(date: str = "20210112") -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     url = f"http://www.czce.com.cn/cn/DFSStaticFiles/Future/{date[:4]}/{date}/FutureDataSettlematched.xls"
-    r = requests.get(url)
+    r = requests.get(url, verify=False, timeout=30)
     r.encoding = "utf-8"
     temp_df = pd.read_excel(BytesIO(r.content), skiprows=1)
     temp_df.columns = [
@@ -281,7 +298,7 @@ def futures_delivery_shfe(date: str = "202312") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/100.0.4896.127 Safari/537.36",
     }
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, verify=False, timeout=30)
     r.encoding = "utf-8"
     data_json = r.json()
     temp_df = pd.DataFrame(data_json["o_curdelivery"])

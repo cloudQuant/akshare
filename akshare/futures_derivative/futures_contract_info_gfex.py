@@ -23,10 +23,20 @@ def futures_contract_info_gfex() -> pd.DataFrame:
         "trade_type": "0",
     }
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "http://www.gfex.com.cn",
+        "Referer": "http://www.gfex.com.cn/gfex/hyxx/ywcs.shtml",
     }
-    r = requests.post(url, params=params, headers=headers)
-    data_json = r.json()
+    r = requests.post(url, params=params, headers=headers, timeout=30)
+    if r.status_code != 200 or not r.text.strip():
+        return pd.DataFrame()
+    try:
+        data_json = r.json()
+    except Exception:
+        return pd.DataFrame()
+    if "data" not in data_json or not data_json["data"]:
+        return pd.DataFrame()
     temp_df = pd.DataFrame(data_json["data"])
     temp_df.rename(
         columns={
