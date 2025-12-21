@@ -8,7 +8,11 @@ https://quote.eastmoney.com/center/qqsc.html
 
 import pandas as pd
 import requests
+import urllib3
 from akshare.utils.func import fetch_paginated_data
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def option_current_em() -> pd.DataFrame:
@@ -121,7 +125,7 @@ def option_current_cffex_em() -> pd.DataFrame:
         "blockName": "callback",
         "_:": "1706689899924",
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, verify=False, timeout=30)
     data_json = r.json()
     temp_df = pd.DataFrame(data_json["list"])
     temp_df.reset_index(inplace=True)

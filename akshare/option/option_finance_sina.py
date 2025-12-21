@@ -90,11 +90,19 @@ def option_cffex_sz50_spot_sina(symbol: str = "ho2303") -> pd.DataFrame:
         "exchange": "cffex",
         "pinzhong": symbol,
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=30)
     data_text = r.text
-    data_json = json.loads(data_text[data_text.find("{") : data_text.rfind("}") + 1])
+    try:
+        data_json = json.loads(data_text[data_text.find("{") : data_text.rfind("}") + 1])
+    except json.JSONDecodeError:
+        return pd.DataFrame()
+    if "result" not in data_json or "data" not in data_json.get("result", {}):
+        return pd.DataFrame()
+    data = data_json["result"]["data"]
+    if "up" not in data or "down" not in data:
+        return pd.DataFrame()
     option_call_df = pd.DataFrame(
-        data_json["result"]["data"]["up"],
+        data["up"],
         columns=[
             "看涨合约-买量",
             "看涨合约-买价",
@@ -108,7 +116,7 @@ def option_cffex_sz50_spot_sina(symbol: str = "ho2303") -> pd.DataFrame:
         ],
     )
     option_put_df = pd.DataFrame(
-        data_json["result"]["data"]["down"],
+        data["down"],
         columns=[
             "看跌合约-买量",
             "看跌合约-买价",
@@ -163,11 +171,19 @@ def option_cffex_hs300_spot_sina(symbol: str = "io2204") -> pd.DataFrame:
         "exchange": "cffex",
         "pinzhong": symbol,
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=30)
     data_text = r.text
-    data_json = json.loads(data_text[data_text.find("{") : data_text.rfind("}") + 1])
+    try:
+        data_json = json.loads(data_text[data_text.find("{") : data_text.rfind("}") + 1])
+    except json.JSONDecodeError:
+        return pd.DataFrame()
+    if "result" not in data_json or "data" not in data_json.get("result", {}):
+        return pd.DataFrame()
+    data = data_json["result"]["data"]
+    if "up" not in data or "down" not in data:
+        return pd.DataFrame()
     option_call_df = pd.DataFrame(
-        data_json["result"]["data"]["up"],
+        data["up"],
         columns=[
             "看涨合约-买量",
             "看涨合约-买价",
@@ -181,7 +197,7 @@ def option_cffex_hs300_spot_sina(symbol: str = "io2204") -> pd.DataFrame:
         ],
     )
     option_put_df = pd.DataFrame(
-        data_json["result"]["data"]["down"],
+        data["down"],
         columns=[
             "看跌合约-买量",
             "看跌合约-买价",
@@ -236,11 +252,19 @@ def option_cffex_zz1000_spot_sina(symbol: str = "mo2208") -> pd.DataFrame:
         "exchange": "cffex",
         "pinzhong": symbol,
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=30)
     data_text = r.text
-    data_json = json.loads(data_text[data_text.find("{") : data_text.rfind("}") + 1])
+    try:
+        data_json = json.loads(data_text[data_text.find("{") : data_text.rfind("}") + 1])
+    except json.JSONDecodeError:
+        return pd.DataFrame()
+    if "result" not in data_json or "data" not in data_json.get("result", {}):
+        return pd.DataFrame()
+    data = data_json["result"]["data"]
+    if "up" not in data or "down" not in data:
+        return pd.DataFrame()
     option_call_df = pd.DataFrame(
-        data_json["result"]["data"]["up"],
+        data["up"],
         columns=[
             "看涨合约-买量",
             "看涨合约-买价",
@@ -254,7 +278,7 @@ def option_cffex_zz1000_spot_sina(symbol: str = "mo2208") -> pd.DataFrame:
         ],
     )
     option_put_df = pd.DataFrame(
-        data_json["result"]["data"]["down"],
+        data["down"],
         columns=[
             "看跌合约-买量",
             "看跌合约-买价",
