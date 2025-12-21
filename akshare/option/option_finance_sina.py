@@ -553,6 +553,8 @@ def option_sse_codes_sina(
     data_text = r.text
     data_temp = data_text.replace('"', ",").split(",")
     temp_list = [i[7:] for i in data_temp if i.startswith("CON_OP_")]
+    if not temp_list:
+        return pd.DataFrame(columns=["序号", "期权代码"])
     temp_df = pd.DataFrame(temp_list)
     temp_df.reset_index(inplace=True)
     temp_df["index"] = temp_df.index + 1
