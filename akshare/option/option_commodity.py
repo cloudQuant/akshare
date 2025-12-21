@@ -78,8 +78,13 @@ def option_hist_dce(
         "tradeType": "2",
         "varietyId": f"{option_code_map[symbol]}",
     }
-    r = requests.post(url, json=payload)
-    data_json = r.json()
+    try:
+        r = requests.post(url, json=payload, timeout=30)
+        if r.status_code != 200:
+            return pd.DataFrame()
+        data_json = r.json()
+    except Exception:
+        return pd.DataFrame()
     temp_df = pd.DataFrame(data_json["data"])
     temp_df.rename(
         columns={
@@ -528,8 +533,13 @@ def option_hist_gfex(symbol: str = "工业硅", trade_date: str = "20230724") ->
         "X-Requested-With": "XMLHttpRequest",
         "content-type": "application/x-www-form-urlencoded",
     }
-    r = requests.post(url, data=payload, headers=headers)
-    data_json = r.json()
+    try:
+        r = requests.post(url, data=payload, headers=headers, timeout=30)
+        if r.status_code != 200:
+            return pd.DataFrame()
+        data_json = r.json()
+    except Exception:
+        return pd.DataFrame()
     temp_df = pd.DataFrame(data_json["data"])
     temp_df.rename(
         columns={
@@ -620,8 +630,13 @@ def option_vol_gfex(symbol: str = "碳酸锂", trade_date: str = "20230724"):
         "X-Requested-With": "XMLHttpRequest",
         "content-type": "application/x-www-form-urlencoded",
     }
-    r = requests.post(url, data=payload, headers=headers)
-    data_json = r.json()
+    try:
+        r = requests.post(url, data=payload, headers=headers, timeout=30)
+        if r.status_code != 200:
+            return pd.DataFrame()
+        data_json = r.json()
+    except Exception:
+        return pd.DataFrame()
     temp_df = pd.DataFrame(data_json["data"])
     temp_df.rename(
         columns={
