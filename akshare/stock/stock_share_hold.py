@@ -15,7 +15,30 @@ import json
 
 import pandas as pd
 import requests
+import ssl
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 from tqdm import tqdm
+
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class SSLAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _get_ssl_session():
+    session = requests.Session()
+    session.mount('https://', SSLAdapter())
+    return session
 
 
 def stock_share_hold_change_sse(symbol: str = "600000") -> pd.DataFrame:
