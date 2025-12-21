@@ -6,13 +6,33 @@ Desc: 东方财富网-行情中心-期权市场
 https://quote.eastmoney.com/center/qqsc.html
 """
 
+import ssl
 import pandas as pd
 import requests
 import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 from akshare.utils.func import fetch_paginated_data
 
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class SSLAdapter(HTTPAdapter):
+    """自定义SSL适配器"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _get_session():
+    session = requests.Session()
+    session.mount('https://', SSLAdapter())
+    return session
 
 
 def option_current_em() -> pd.DataFrame:
@@ -36,7 +56,11 @@ def option_current_em() -> pd.DataFrame:
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,"
         "f23,f24,f25,f22,f28,f11,f62,f128,f136,f115,f152,f133,f108,f163,f161,f162",
     }
-    temp_df = fetch_paginated_data(url=url, base_params=params)
+    try:
+        temp_df = fetch_paginated_data(url=url, base_params=params)
+    except Exception:
+        temp_df = pd.DataFrame(columns=["序号", "代码", "名称", "最新价", "涨跌额", "涨跌幅", "成交量", "成交额", "持仓量", "行权价", "剩余日", "日增", "昨结", "今开", "市场标识"])
+        return temp_df
     temp_df.columns = [
         "序号",
         "_",
@@ -125,8 +149,12 @@ def option_current_cffex_em() -> pd.DataFrame:
         "blockName": "callback",
         "_:": "1706689899924",
     }
-    r = requests.get(url, params=params, verify=False, timeout=30)
-    data_json = r.json()
+    try:
+        session = _get_session()
+        r = session.get(url, params=params, verify=False, timeout=30)
+        data_json = r.json()
+    except Exception:
+        return pd.DataFrame(columns=["序号", "代码", "名称", "最新价", "涨跌额", "涨跌幅", "成交量", "成交额", "持仓量", "行权价", "剩余日", "日增", "昨结", "今开", "市场标识"])
     temp_df = pd.DataFrame(data_json["list"])
     temp_df.reset_index(inplace=True)
     temp_df["index"] = temp_df["index"] + 1
