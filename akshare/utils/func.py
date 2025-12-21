@@ -29,7 +29,7 @@ def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
     # 复制参数以避免修改原始参数
     params = base_params.copy()
     # 获取第一页数据，用于确定分页信息
-    r = requests.get(url, params=params, timeout=timeout)
+    r = requests.get(url, params=params, timeout=timeout, verify=False)
     data_json = r.json()
     # 计算分页信息
     per_page_num = len(data_json["data"]["diff"])
@@ -43,7 +43,7 @@ def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
     # 获取剩余页面数据
     for page in tqdm(range(2, total_page + 1), leave=False):
         params.update({"pn": page})
-        r = requests.get(url, params=params, timeout=timeout)
+        r = requests.get(url, params=params, timeout=timeout, verify=False)
         data_json = r.json()
         inner_temp_df = pd.DataFrame(data_json["data"]["diff"])
         temp_list.append(inner_temp_df)
