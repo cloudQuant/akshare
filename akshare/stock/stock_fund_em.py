@@ -7,13 +7,37 @@ https://data.eastmoney.com/zjlx/detail.html
 """
 
 import math
+import ssl
 import time
 from functools import lru_cache
 
 import pandas as pd
 import requests
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 
 from akshare.utils.func import fetch_paginated_data
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class SSLAdapter(HTTPAdapter):
+    """自定义SSL适配器"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _get_session():
+    session = requests.Session()
+    session.mount('https://', SSLAdapter())
+    return session
 from akshare.utils.tqdm import get_tqdm
 
 
@@ -159,8 +183,14 @@ def stock_individual_fund_flow_rank(indicator: str = "5日") -> pd.DataFrame:
         "fs": "m:0+t:6+f:!2,m:0+t:13+f:!2,m:0+t:80+f:!2,m:1+t:2+f:!2,m:1+t:23+f:!2,m:0+t:7+f:!2,m:1+t:3+f:!2",
         "fields": indicator_map[indicator][1],
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
+    try:
+        session = _get_session()
+        r = session.get(url, params=params, verify=False, timeout=30)
+        data_json = r.json()
+    except Exception:
+        return pd.DataFrame()
+    if "data" not in data_json or data_json["data"] is None:
+        return pd.DataFrame()
     total_page = math.ceil(data_json["data"]["total"] / 100)
     temp_list = []
     tqdm = get_tqdm()
@@ -170,8 +200,11 @@ def stock_individual_fund_flow_rank(indicator: str = "5日") -> pd.DataFrame:
                 "pn": page,
             }
         )
-        r = requests.get(url, params=params, timeout=15)
-        data_json = r.json()
+        try:
+            r = session.get(url, params=params, verify=False, timeout=30)
+            data_json = r.json()
+        except Exception:
+            continue
         inner_temp_df = pd.DataFrame(data_json["data"]["diff"])
         temp_list.append(inner_temp_df)
     temp_df = pd.concat(temp_list, ignore_index=True)
@@ -506,8 +539,11 @@ def stock_sector_fund_flow_rank(
                 "pn": page,
             }
         )
-        r = requests.get(url, params=params, timeout=15)
-        data_json = r.json()
+        try:
+            r = session.get(url, params=params, verify=False, timeout=30)
+            data_json = r.json()
+        except Exception:
+            continue
         inner_temp_df = pd.DataFrame(data_json["data"]["diff"])
         temp_list.append(inner_temp_df)
     temp_df = pd.concat(temp_list, ignore_index=True)
