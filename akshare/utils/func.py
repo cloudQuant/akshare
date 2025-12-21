@@ -40,8 +40,6 @@ def _get_ssl_session():
     return session
 
 
-
-
 def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
     """
     东方财富-分页获取数据并合并结果
@@ -73,8 +71,7 @@ def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
     # 获取剩余页面数据
     for page in tqdm(range(2, total_page + 1), leave=False):
         params.update({"pn": page})
-        session = _get_ssl_session()
-    r = session.get(url, params=params, timeout=timeout, verify=False)
+        r = session.get(url, params=params, timeout=timeout, verify=False)
         data_json = r.json()
         inner_temp_df = pd.DataFrame(data_json["data"]["diff"])
         temp_list.append(inner_temp_df)
