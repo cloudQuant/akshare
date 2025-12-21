@@ -6,9 +6,31 @@ Desc: 东方财富网-数据中心-股票回购-股票回购数据
 https://data.eastmoney.com/gphg/hglist.html
 """
 
+import ssl
 import pandas as pd
 import requests
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 from tqdm import tqdm
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class SSLAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _get_session():
+    session = requests.Session()
+    session.mount('https://', SSLAdapter())
+    return session
 
 
 def stock_repurchase_em() -> pd.DataFrame:
@@ -28,13 +50,22 @@ def stock_repurchase_em() -> pd.DataFrame:
         "columns": "ALL",
         "source": "WEB",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
+    session = _get_session()
+    try:
+        r = session.get(url, params=params, verify=False, timeout=30)
+        data_json = r.json()
+    except Exception:
+        return pd.DataFrame()
+    if "result" not in data_json or data_json["result"] is None:
+        return pd.DataFrame()
     total_page = data_json["result"]["pages"]
     big_df = pd.DataFrame()
     for page in tqdm(range(1, int(total_page) + 1), leave=False):
         params.update({"pageNumber": page})
-        r = requests.get(url, params=params)
+        try:
+            r = session.get(url, params=params, verify=False, timeout=30)
+        except Exception:
+            continue
         data_json = r.json()
         temp_df = pd.DataFrame(data_json["result"]["data"])
         big_df = pd.concat([big_df, temp_df], ignore_index=True)
