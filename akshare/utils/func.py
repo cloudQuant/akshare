@@ -5,12 +5,41 @@ Desc: 通用帮助函数
 """
 
 import math
+import ssl
 from typing import List, Dict
 
 import pandas as pd
 import requests
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 
 from akshare.utils.tqdm import get_tqdm
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class SSLAdapter(HTTPAdapter):
+    """自定义SSL适配器，解决SSL握手问题"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _get_ssl_session():
+    """创建带有自定义SSL处理的session"""
+    session = requests.Session()
+    adapter = SSLAdapter()
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
+
 
 
 def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
@@ -29,7 +58,8 @@ def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
     # 复制参数以避免修改原始参数
     params = base_params.copy()
     # 获取第一页数据，用于确定分页信息
-    r = requests.get(url, params=params, timeout=timeout, verify=False)
+    session = _get_ssl_session()
+    r = session.get(url, params=params, timeout=timeout, verify=False)
     data_json = r.json()
     # 计算分页信息
     per_page_num = len(data_json["data"]["diff"])
@@ -43,7 +73,8 @@ def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
     # 获取剩余页面数据
     for page in tqdm(range(2, total_page + 1), leave=False):
         params.update({"pn": page})
-        r = requests.get(url, params=params, timeout=timeout, verify=False)
+        session = _get_ssl_session()
+    r = session.get(url, params=params, timeout=timeout, verify=False)
         data_json = r.json()
         inner_temp_df = pd.DataFrame(data_json["data"]["diff"])
         temp_list.append(inner_temp_df)
