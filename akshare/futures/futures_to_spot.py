@@ -51,7 +51,7 @@ def futures_to_spot_shfe(date: str = "202312") -> pd.DataFrame:
     :return: 上海期货交易所期转现
     :rtype: pandas.DataFrame
     """
-    url = f"https://tsite.shfe.com.cn/data/instrument/ExchangeDelivery{date}.dat"
+    url = f"https://www.shfe.com.cn/data/instrument/ExchangeDelivery{date}.dat"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/100.0.4896.127 Safari/537.36",
@@ -306,7 +306,7 @@ def futures_delivery_shfe(date: str = "202312") -> pd.DataFrame:
     :return: 上海期货交易所-交割情况表
     :rtype: pandas.DataFrame
     """
-    url = f"https://tsite.shfe.com.cn/data/dailydata/{date}monthvarietystatistics.dat"
+    url = f"https://www.shfe.com.cn/data/dailydata/{date}monthvarietystatistics.dat"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/100.0.4896.127 Safari/537.36",
