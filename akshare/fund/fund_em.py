@@ -297,7 +297,7 @@ def fund_open_fund_daily_em() -> pd.DataFrame:
         "atfc": "",
         "onlySale": "0",
     }
-    res = requests.get(url, params=params, headers=headers, timeout=30)
+    res = requests.get(url, params=params, headers=headers, timeout=300)
     text_data = res.text
     json_text = _js_to_json(text_data.strip("var db="))
     data_json = json.loads(json_text)
@@ -812,6 +812,7 @@ def fund_graded_fund_daily_em() -> pd.DataFrame:
         "日增长率",
         "市价",
         "折价率",
+        "-",
         "-",
         "-",
         "-",

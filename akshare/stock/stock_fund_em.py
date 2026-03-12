@@ -185,7 +185,7 @@ def stock_individual_fund_flow_rank(indicator: str = "5日") -> pd.DataFrame:
     }
     try:
         session = _get_session()
-        r = session.get(url, params=params, verify=False, timeout=30)
+        r = session.get(url, params=params, verify=False, timeout=300)
         data_json = r.json()
     except Exception:
         return pd.DataFrame()
@@ -201,7 +201,7 @@ def stock_individual_fund_flow_rank(indicator: str = "5日") -> pd.DataFrame:
             }
         )
         try:
-            r = session.get(url, params=params, verify=False, timeout=30)
+            r = session.get(url, params=params, verify=False, timeout=300)
             data_json = r.json()
         except Exception:
             continue
@@ -540,7 +540,7 @@ def stock_sector_fund_flow_rank(
             }
         )
         try:
-            r = session.get(url, params=params, verify=False, timeout=30)
+            r = session.get(url, params=params, verify=False, timeout=300)
             data_json = r.json()
         except Exception:
             continue

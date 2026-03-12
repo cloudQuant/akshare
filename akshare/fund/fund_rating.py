@@ -105,7 +105,7 @@ def fund_rating_sh(date: str = "20230630") -> pd.DataFrame:
     ]
     date_format = "-".join([date[:4], date[4:6], date[6:]])
     if date_format not in date_list:
-        raise "请访问 https://fund.eastmoney.com/data/fundrating_3.html 获取查询日期"
+        raise Exception("请访问 https://fund.eastmoney.com/data/fundrating_3.html 获取查询日期")
     url = f"https://fund.eastmoney.com/data/fundrating_3_{'-'.join([date[:4], date[4:6], date[6:]])}.html"
     r = requests.get(url)
     soup = BeautifulSoup(r.text, "lxml")
@@ -203,7 +203,7 @@ def fund_rating_zs(date: str = "20230331") -> pd.DataFrame:
     ]
     date_format = "-".join([date[:4], date[4:6], date[6:]])
     if date_format not in date_list:
-        raise "请访问 https://fund.eastmoney.com/data/fundrating_2.html 获取查询日期"
+        raise Exception("请访问 https://fund.eastmoney.com/data/fundrating_2.html 获取查询日期")
     url = f"https://fund.eastmoney.com/data/fundrating_2_{'-'.join([date[:4], date[4:6], date[6:]])}.html"
     r = requests.get(url)
     soup = BeautifulSoup(r.text, "lxml")
@@ -290,7 +290,7 @@ def fund_rating_ja(date: str = "20230331") -> pd.DataFrame:
     ]
     date_format = "-".join([date[:4], date[4:6], date[6:]])
     if date_format not in date_list:
-        raise "请访问 http://fund.eastmoney.com/data/fundrating_4.html 获取查询日期"
+        raise Exception("请访问 http://fund.eastmoney.com/data/fundrating_4.html 获取查询日期")
     url = f"https://fund.eastmoney.com/data/fundrating_4_{'-'.join([date[:4], date[4:6], date[6:]])}.html"
     r = requests.get(url)
     soup = BeautifulSoup(r.text, "lxml")

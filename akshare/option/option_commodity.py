@@ -79,7 +79,7 @@ def option_hist_dce(
         "varietyId": f"{option_code_map[symbol]}",
     }
     try:
-        r = requests.post(url, json=payload, timeout=30)
+        r = requests.post(url, json=payload, timeout=300)
         if r.status_code != 200:
             return pd.DataFrame()
         data_json = r.json()
@@ -534,7 +534,7 @@ def option_hist_gfex(symbol: str = "工业硅", trade_date: str = "20230724") ->
         "content-type": "application/x-www-form-urlencoded",
     }
     try:
-        r = requests.post(url, data=payload, headers=headers, timeout=30)
+        r = requests.post(url, data=payload, headers=headers, timeout=300)
         if r.status_code != 200:
             return pd.DataFrame()
         data_json = r.json()
@@ -631,7 +631,7 @@ def option_vol_gfex(symbol: str = "碳酸锂", trade_date: str = "20230724"):
         "content-type": "application/x-www-form-urlencoded",
     }
     try:
-        r = requests.post(url, data=payload, headers=headers, timeout=30)
+        r = requests.post(url, data=payload, headers=headers, timeout=300)
         if r.status_code != 200:
             return pd.DataFrame()
         data_json = r.json()

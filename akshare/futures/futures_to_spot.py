@@ -57,7 +57,7 @@ def futures_to_spot_shfe(date: str = "202312") -> pd.DataFrame:
         "Chrome/100.0.4896.127 Safari/537.36",
     }
     session = _get_session_with_ssl()
-    r = session.get(url, headers=headers, verify=False, timeout=30)
+    r = session.get(url, headers=headers, verify=False, timeout=300)
     data_json = r.json()
     temp_df = pd.DataFrame(data_json["ExchangeDelivery"])
     temp_df.columns = [
@@ -281,7 +281,7 @@ def futures_delivery_czce(date: str = "20210112") -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     url = f"http://www.czce.com.cn/cn/DFSStaticFiles/Future/{date[:4]}/{date}/FutureDataSettlematched.xls"
-    r = requests.get(url, verify=False, timeout=30)
+    r = requests.get(url, verify=False, timeout=300)
     r.encoding = "utf-8"
     temp_df = pd.read_excel(BytesIO(r.content), skiprows=1)
     temp_df.columns = [
@@ -312,7 +312,7 @@ def futures_delivery_shfe(date: str = "202312") -> pd.DataFrame:
         "Chrome/100.0.4896.127 Safari/537.36",
     }
     session = _get_session_with_ssl()
-    r = session.get(url, headers=headers, verify=False, timeout=30)
+    r = session.get(url, headers=headers, verify=False, timeout=300)
     r.encoding = "utf-8"
     data_json = r.json()
     temp_df = pd.DataFrame(data_json["o_curdelivery"])
