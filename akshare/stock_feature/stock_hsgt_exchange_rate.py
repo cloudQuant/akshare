@@ -10,9 +10,12 @@ Desc: 参考汇率和结算汇率
 
 import warnings
 from datetime import datetime
+from io import BytesIO
 
 import pandas as pd
 import requests
+
+from akshare.utils.request import request_szse
 
 
 def stock_sgt_settlement_exchange_rate_szse() -> pd.DataFrame:
@@ -29,10 +32,10 @@ def stock_sgt_settlement_exchange_rate_szse() -> pd.DataFrame:
         "TABKEY": "tab2",
         "random": "0.9184251620553985",
     }
-    r = requests.get(url, params=params)
+    r = request_szse(url, params=params, timeout=150)
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
-        temp_df = pd.read_excel(r.content, engine="openpyxl")
+        temp_df = pd.read_excel(BytesIO(r.content), engine="openpyxl")
     temp_df.sort_values(by="适用日期", inplace=True, ignore_index=True)
     temp_df["适用日期"] = pd.to_datetime(temp_df["适用日期"], errors="coerce").dt.date
     temp_df["买入结算汇兑比率"] = pd.to_numeric(
@@ -58,10 +61,10 @@ def stock_sgt_reference_exchange_rate_szse() -> pd.DataFrame:
         "TABKEY": "tab1",
         "random": "0.9184251620553985",
     }
-    r = requests.get(url, params=params)
+    r = request_szse(url, params=params, timeout=150)
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
-        temp_df = pd.read_excel(r.content, engine="openpyxl")
+        temp_df = pd.read_excel(BytesIO(r.content), engine="openpyxl")
     temp_df.sort_values(by="适用日期", inplace=True, ignore_index=True)
     temp_df["适用日期"] = pd.to_datetime(temp_df["适用日期"], errors="coerce").dt.date
     temp_df["参考汇率买入价"] = pd.to_numeric(

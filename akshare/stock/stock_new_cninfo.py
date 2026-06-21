@@ -55,10 +55,22 @@ def stock_new_gh_cninfo() -> pd.DataFrame:
         "Chrome/93.0.4577.63 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
     }
-    r = requests.post(url, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["records"])
-    temp_df.columns = [
+    try:
+        r = requests.post(url, headers=headers, timeout=15)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"CNInfo IPO review endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"CNInfo IPO review endpoint returned HTTP {r.status_code}: {url}"
+        )
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"CNInfo IPO review endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
+    columns = [
         "公司名称",
         "上会日期",
         "审核类型",
@@ -66,6 +78,11 @@ def stock_new_gh_cninfo() -> pd.DataFrame:
         "审核结果",
         "审核公告日",
     ]
+    records = data_json.get("records") or []
+    if not records:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame(records)
+    temp_df.columns = columns
     temp_df["上会日期"] = pd.to_datetime(temp_df["上会日期"], errors="coerce").dt.date
     temp_df["审核公告日"] = pd.to_datetime(
         temp_df["审核公告日"], errors="coerce"

@@ -260,9 +260,13 @@ def stock_xgsr_ths() -> pd.DataFrame:
         "hexin-v": v_code,
     }
     url = "https://data.10jqka.com.cn/ipo/xgsr/field/SSRQ/order/desc/page/1/ajax/1/free/1/"
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, timeout=15)
+    r.raise_for_status()
     soup = BeautifulSoup(r.text, features="lxml")
-    page_num = soup.find(name="span", attrs={"class": "page_info"}).text.split("/")[1]
+    page_info = soup.find(name="span", attrs={"class": "page_info"})
+    if page_info is None:
+        return pd.DataFrame()
+    page_num = page_info.text.split("/")[1]
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, int(page_num) + 1), leave=False):
@@ -274,7 +278,8 @@ def stock_xgsr_ths() -> pd.DataFrame:
             "Cookie": f"v={v_code}",
             "hexin-v": v_code,
         }
-        r = requests.get(url, headers=headers)
+        r = requests.get(url, headers=headers, timeout=15)
+        r.raise_for_status()
         temp_df = pd.read_html(StringIO(r.text))[0]
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
 
@@ -312,25 +317,10 @@ def stock_ipo_benefit_ths() -> pd.DataFrame:
         "hexin-v": v_code,
     }
     url = "https://data.10jqka.com.cn/ipo/syg/field/invest/order/desc/page/1/ajax/1/free/1/"
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, timeout=15)
+    r.raise_for_status()
     soup = BeautifulSoup(r.text, features="lxml")
-    page_num = soup.find(name="span", attrs={"class": "page_info"}).text.split("/")[1]
-    big_df = pd.DataFrame()
-    tqdm = get_tqdm()
-    for page in tqdm(range(1, int(page_num) + 1), leave=False):
-        url = f"https://data.10jqka.com.cn/ipo/syg/field/invest/order/desc/page/{page}/ajax/1/free/1/"
-        v_code = js_code.call("v")
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/89.0.4389.90 Safari/537.36",
-            "Cookie": f"v={v_code}",
-            "hexin-v": v_code,
-        }
-        r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text))[0]
-        big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
-
-    big_df.columns = [
+    output_columns = [
         "序号",
         "股票代码",
         "股票简称",
@@ -342,6 +332,30 @@ def stock_ipo_benefit_ths() -> pd.DataFrame:
         "投资占市值比",
         "参股对象",
     ]
+    page_info = soup.find(name="span", attrs={"class": "page_info"})
+    if page_info is None:
+        return pd.DataFrame(columns=output_columns)
+    page_num = page_info.text.split("/")[1]
+    big_df = pd.DataFrame()
+    tqdm = get_tqdm()
+    for page in tqdm(range(1, int(page_num) + 1), leave=False):
+        url = f"https://data.10jqka.com.cn/ipo/syg/field/invest/order/desc/page/{page}/ajax/1/free/1/"
+        v_code = js_code.call("v")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/89.0.4389.90 Safari/537.36",
+            "Cookie": f"v={v_code}",
+            "hexin-v": v_code,
+        }
+        r = requests.get(url, headers=headers, timeout=15)
+        r.raise_for_status()
+        temp_df = pd.read_html(StringIO(r.text))[0]
+        big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
+
+    big_df.columns = output_columns
     big_df["股票代码"] = big_df["股票代码"].astype(str).str.zfill(6)
     big_df["序号"] = pd.to_numeric(big_df["序号"], errors="coerce")
     big_df["收盘价"] = pd.to_numeric(big_df["收盘价"], errors="coerce")

@@ -18,6 +18,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.ssl_ import create_urllib3_context
 
 from akshare.utils.func import fetch_paginated_data
+from akshare.utils.request import request_eastmoney
 
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -69,9 +70,11 @@ def stock_individual_fund_flow(
         "ut": "b2884a393a59ad64002292a3e90d46a5",
         "_": int(time.time() * 1000),
     }
-    r = requests.get(url, params=params, headers=headers)
+    r = request_eastmoney(url, params=params, headers=headers, timeout=15)
     data_json = r.json()
-    content_list = data_json["data"]["klines"]
+    content_list = (data_json.get("data") or {}).get("klines") or []
+    if not content_list:
+        return pd.DataFrame()
     temp_df = pd.DataFrame([item.split(",") for item in content_list])
     temp_df.columns = [
         "日期",
@@ -184,8 +187,7 @@ def stock_individual_fund_flow_rank(indicator: str = "5日") -> pd.DataFrame:
         "fields": indicator_map[indicator][1],
     }
     try:
-        session = _get_session()
-        r = session.get(url, params=params, verify=False, timeout=300)
+        r = request_eastmoney(url, params=params, timeout=300)
         data_json = r.json()
     except Exception:
         return pd.DataFrame()
@@ -201,12 +203,14 @@ def stock_individual_fund_flow_rank(indicator: str = "5日") -> pd.DataFrame:
             }
         )
         try:
-            r = session.get(url, params=params, verify=False, timeout=300)
+            r = request_eastmoney(url, params=params, timeout=300)
             data_json = r.json()
         except Exception:
             continue
         inner_temp_df = pd.DataFrame(data_json["data"]["diff"])
         temp_list.append(inner_temp_df)
+    if not temp_list:
+        return pd.DataFrame()
     temp_df = pd.concat(temp_list, ignore_index=True)
     temp_df.reset_index(inplace=True)
     temp_df["index"] = range(1, len(temp_df) + 1)
@@ -399,9 +403,11 @@ def stock_market_fund_flow() -> pd.DataFrame:
         "ut": "b2884a393a59ad64002292a3e90d46a5",
         "_": int(time.time() * 1000),
     }
-    r = requests.get(url, params=params, headers=headers)
+    r = request_eastmoney(url, params=params, headers=headers, timeout=15)
     data_json = r.json()
-    content_list = data_json["data"]["klines"]
+    content_list = (data_json.get("data") or {}).get("klines") or []
+    if not content_list:
+        return pd.DataFrame()
     temp_df = pd.DataFrame([item.split(",") for item in content_list])
     temp_df.columns = [
         "日期",
@@ -528,7 +534,7 @@ def stock_sector_fund_flow_rank(
         "rt": "52975239",
         "_": int(time.time() * 1000),
     }
-    r = requests.get(url, params=params, headers=headers)
+    r = request_eastmoney(url, params=params, headers=headers, timeout=15)
     data_json = r.json()
     total_page = math.ceil(data_json["data"]["total"] / 100)
     temp_list = []
@@ -540,7 +546,7 @@ def stock_sector_fund_flow_rank(
             }
         )
         try:
-            r = session.get(url, params=params, verify=False, timeout=300)
+            r = request_eastmoney(url, params=params, headers=headers, timeout=300)
             data_json = r.json()
         except Exception:
             continue
@@ -722,7 +728,14 @@ def stock_sector_fund_flow_summary(
     :return: xx行业个股资金流
     :rtype: pandas.DataFrame
     """
-    code_name_map = _get_stock_sector_fund_flow_summary_code()
+    try:
+        code_name_map = _get_stock_sector_fund_flow_summary_code()
+    except Exception as exc:
+        raise RuntimeError(
+            "Eastmoney sector fund flow summary endpoint request failed"
+        ) from exc
+    if symbol not in code_name_map:
+        raise RuntimeError(f"Eastmoney sector fund flow symbol not found: {symbol}")
     url = "https://push2.eastmoney.com/api/qt/clist/get"
     if indicator == "今日":
         params = {
@@ -736,7 +749,7 @@ def stock_sector_fund_flow_summary(
             "fs": f"b:{code_name_map[symbol]}",
             "fields": "f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f204,f205,f124,f1,f13",
         }
-        r = requests.get(url, params=params)
+        r = request_eastmoney(url, params=params, timeout=15)
         data_json = r.json()
         temp_df = pd.DataFrame(data_json["data"]["diff"]).T
         temp_df.reset_index(inplace=True)
@@ -825,7 +838,7 @@ def stock_sector_fund_flow_summary(
             "fs": f"b:{code_name_map[symbol]}",
             "fields": "f12,f14,f2,f109,f164,f165,f166,f167,f168,f169,f170,f171,f172,f173,f257,f258,f124,f1,f13",
         }
-        r = requests.get(url, params=params)
+        r = request_eastmoney(url, params=params, timeout=15)
         data_json = r.json()
         temp_df = pd.DataFrame(data_json["data"]["diff"]).T
         temp_df.reset_index(inplace=True)
@@ -914,7 +927,7 @@ def stock_sector_fund_flow_summary(
             "fs": f"b:{code_name_map[symbol]}",
             "fields": "f12,f14,f2,f160,f174,f175,f176,f177,f178,f179,f180,f181,f182,f183,f260,f261,f124,f1,f13",
         }
-        r = requests.get(url, params=params)
+        r = request_eastmoney(url, params=params, timeout=15)
         data_json = r.json()
         temp_df = pd.DataFrame(data_json["data"]["diff"]).T
         temp_df.reset_index(inplace=True)
@@ -995,6 +1008,36 @@ def stock_sector_fund_flow_summary(
         return pd.DataFrame()
 
 
+def _get_eastmoney_fund_flow_klines(
+    url: str, params: dict, symbol: str, endpoint_name: str
+) -> list:
+    try:
+        r = request_eastmoney(url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} fund flow endpoint request failed: {url}"
+        ) from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} fund flow endpoint returned HTTP "
+            f"{r.status_code}: {url}"
+        )
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} fund flow endpoint returned non-JSON "
+            f"response: {url}; preview={r.text[:120]!r}"
+        ) from exc
+    data = data_json.get("data")
+    if not data:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} fund flow endpoint returned empty data "
+            f"for symbol={symbol}"
+        )
+    return data.get("klines") or []
+
+
 def stock_sector_fund_flow_hist(symbol: str = "汽车服务") -> pd.DataFrame:
     """
     东方财富网-数据中心-资金流向-行业资金流-行业历史资金流
@@ -1004,7 +1047,14 @@ def stock_sector_fund_flow_hist(symbol: str = "汽车服务") -> pd.DataFrame:
     :return: xx行业个股资金流
     :rtype: pandas.DataFrame
     """
-    code_name_map = _get_stock_sector_fund_flow_summary_code()
+    try:
+        code_name_map = _get_stock_sector_fund_flow_summary_code()
+    except Exception as exc:
+        raise RuntimeError(
+            "Eastmoney sector fund flow summary endpoint request failed"
+        ) from exc
+    if symbol not in code_name_map:
+        raise RuntimeError(f"Eastmoney sector fund flow symbol not found: {symbol}")
     url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
     params = {
         "lmt": "0",
@@ -1013,10 +1063,7 @@ def stock_sector_fund_flow_hist(symbol: str = "汽车服务") -> pd.DataFrame:
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
         "secid": f"90.{code_name_map[symbol]}",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    temp_df.columns = [
+    columns = [
         "日期",
         "主力净流入-净额",
         "小单净流入-净额",
@@ -1033,6 +1080,11 @@ def stock_sector_fund_flow_hist(symbol: str = "汽车服务") -> pd.DataFrame:
         "-",
         "-",
     ]
+    klines = _get_eastmoney_fund_flow_klines(url, params, symbol, "sector")
+    if not klines:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
+    temp_df.columns = columns
     temp_df = temp_df[
         [
             "日期",
@@ -1116,7 +1168,14 @@ def stock_concept_fund_flow_hist(symbol: str = "数据要素") -> pd.DataFrame:
     :return: 概念历史资金流
     :rtype: pandas.DataFrame
     """
-    code_name_map = _get_stock_concept_fund_flow_summary_code()
+    try:
+        code_name_map = _get_stock_concept_fund_flow_summary_code()
+    except Exception as exc:
+        raise RuntimeError(
+            "Eastmoney concept fund flow summary endpoint request failed"
+        ) from exc
+    if symbol not in code_name_map:
+        raise RuntimeError(f"Eastmoney concept fund flow symbol not found: {symbol}")
     url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
     params = {
         "lmt": "0",
@@ -1125,10 +1184,7 @@ def stock_concept_fund_flow_hist(symbol: str = "数据要素") -> pd.DataFrame:
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
         "secid": f"90.{code_name_map[symbol]}",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    temp_df.columns = [
+    columns = [
         "日期",
         "主力净流入-净额",
         "小单净流入-净额",
@@ -1145,6 +1201,11 @@ def stock_concept_fund_flow_hist(symbol: str = "数据要素") -> pd.DataFrame:
         "-",
         "-",
     ]
+    klines = _get_eastmoney_fund_flow_klines(url, params, symbol, "concept")
+    if not klines:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
+    temp_df.columns = columns
     temp_df = temp_df[
         [
             "日期",

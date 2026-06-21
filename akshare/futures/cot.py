@@ -545,9 +545,11 @@ def _get_dce_contract_list(date, var):
         "contract": "",
     }
 
-    while 1:
+    for _ in range(1):
         try:
-            r = requests.post(url, params=params, headers=headers)
+            r = requests.post(url, params=params, headers=headers, timeout=8)
+            if r.status_code != 200:
+                return []
             soup = BeautifulSoup(r.text, "lxml")
             contract_list = [
                 re.findall(
@@ -558,9 +560,9 @@ def _get_dce_contract_list(date, var):
             ]
             contract_list = [var.lower() + item for item in contract_list]
             return contract_list  # noqa: E722
-        except:  # noqa: E722
-            time.sleep(5)
+        except requests.RequestException:
             continue
+    return []
 
 
 def get_dce_rank_table(date: str = "20230706", vars_list=cons.contract_symbols) -> dict:
@@ -666,7 +668,7 @@ def get_dce_rank_table(date: str = "20230706", vars_list=cons.contract_symbols) 
                     "contract.variety_id": var.lower(),
                     "contract": "",
                 }
-                r = requests.post(temp_url, data=payload)
+                r = requests.post(temp_url, data=payload, timeout=8)
                 if r.status_code != 200:
                     big_dict[symbol] = {}
                 else:
@@ -841,9 +843,23 @@ def futures_dce_position_rank(
         "tradeType": "1",
         "lang": "zh",
     }
-    r = requests.post(url, json=payload)
     big_dict = dict()
-    with zipfile.ZipFile(BytesIO(r.content), mode="r") as z:
+    try:
+        r = requests.post(url, json=payload, timeout=15)
+    except requests.RequestException as exc:
+        warnings.warn(f"{date_str} DCE position rank request failed: {exc}")
+        return big_dict
+    if r.status_code != 200:
+        warnings.warn(
+            f"{date_str} DCE position rank request returned HTTP {r.status_code}"
+        )
+        return big_dict
+    content_buffer = BytesIO(r.content)
+    if not zipfile.is_zipfile(content_buffer):
+        warnings.warn(f"{date_str} DCE position rank response is not a zip file")
+        return big_dict
+    content_buffer.seek(0)
+    with zipfile.ZipFile(content_buffer, mode="r") as z:
         for i in z.namelist():
             file_name = i
             if not file_name.startswith(date_str):

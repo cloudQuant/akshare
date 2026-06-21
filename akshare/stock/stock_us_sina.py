@@ -42,6 +42,7 @@ def __get_us_page_count() -> int:
     res = requests.get(
         us_sina_stock_list_url.format(dict_list),
         params=us_sina_stock_dict_payload,
+        timeout=15,
     )
     data_json = json.loads(res.text[res.text.find("({") + 1 : res.text.rfind(");")])
     if not isinstance(int(data_json["count"]) / 20, int):
@@ -52,7 +53,7 @@ def __get_us_page_count() -> int:
 
 
 @lru_cache()
-def get_us_stock_name() -> pd.DataFrame:
+def get_us_stock_name(max_pages: int | None = None) -> pd.DataFrame:
     """
     u.s. stock's english name, chinese name and symbol
     you should use symbol to get apply into the next function
@@ -62,6 +63,8 @@ def get_us_stock_name() -> pd.DataFrame:
     """
     big_df = pd.DataFrame()
     page_count = __get_us_page_count()
+    if max_pages is not None:
+        page_count = min(page_count, int(max_pages))
     for page in tqdm(range(1, page_count + 1), leave=False):
         us_js_decode = (
             "US_CategoryService.getList?page={}&num=20&sort=&asc=0&market=&id=".format(
@@ -75,6 +78,7 @@ def get_us_stock_name() -> pd.DataFrame:
         res = requests.get(
             us_sina_stock_list_url.format(dict_list),
             params=us_sina_stock_dict_payload,
+            timeout=15,
         )
         data_json = json.loads(res.text[res.text.find("({") + 1 : res.text.rfind(");")])
         big_df = pd.concat(
@@ -83,7 +87,7 @@ def get_us_stock_name() -> pd.DataFrame:
     return big_df[["name", "cname", "symbol"]]
 
 
-def stock_us_spot() -> pd.DataFrame:
+def stock_us_spot(max_pages: int | None = None) -> pd.DataFrame:
     """
     新浪财经-所有美股的数据, 注意延迟 15 分钟
     https://finance.sina.com.cn/stock/usstock/sector.shtml
@@ -92,6 +96,8 @@ def stock_us_spot() -> pd.DataFrame:
     """
     big_df = pd.DataFrame()
     page_count = __get_us_page_count()
+    if max_pages is not None:
+        page_count = min(page_count, int(max_pages))
     for page in tqdm(range(1, page_count + 1), leave=False):
         # page = "1"
         us_js_decode = (
@@ -106,6 +112,7 @@ def stock_us_spot() -> pd.DataFrame:
         res = requests.get(
             us_sina_stock_list_url.format(dict_list),
             params=us_sina_stock_dict_payload,
+            timeout=15,
         )
         data_json = json.loads(res.text[res.text.find("({") + 1 : res.text.rfind(");")])
         big_df = pd.concat(
@@ -129,7 +136,7 @@ def stock_us_daily(symbol: str = "FB", adjust: str = "") -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     url = f"https://finance.sina.com.cn/staticdata/us/{symbol}"
-    res = requests.get(url)
+    res = requests.get(url, timeout=15)
     js_code = py_mini_racer.MiniRacer()
     js_code.eval(zh_js_decode)
     dict_list = js_code.call("d", res.text.split("=")[1].split(";")[0].replace('"', ""))
@@ -140,7 +147,7 @@ def stock_us_daily(symbol: str = "FB", adjust: str = "") -> pd.DataFrame:
     del data_df["date"]
     data_df = data_df.astype("float")
     url = us_sina_stock_hist_qfq_url.format(symbol)
-    res = requests.get(url)
+    res = requests.get(url, timeout=15)
     qfq_factor_df = pd.DataFrame(eval(res.text.split("=")[1].split("\n")[0])["data"])
     qfq_factor_df.rename(
         columns={
@@ -164,7 +171,7 @@ def stock_us_daily(symbol: str = "FB", adjust: str = "") -> pd.DataFrame:
 
     if adjust == "qfq":
         if len(new_range) == 1:
-            new_range.index.values[0] = pd.to_datetime(str(data_df.index.date[0]))
+            new_range.index = [pd.to_datetime(str(data_df.index.date[0]))]
         temp_df = pd.merge(
             data_df, new_range, left_index=True, right_index=True, how="left"
         )
@@ -224,7 +231,7 @@ if __name__ == "__main__":
     stock_us_daily_df = stock_us_daily(symbol=".DJI", adjust="")
     print(stock_us_daily_df)
 
-    stock_us_daily_qfq_df = stock_us_daily(symbol=".DJI", adjust="qfq")
+    stock_us_daily_qfq_df = stock_us_daily(symbol='WOLF', adjust='qfq')
     print(stock_us_daily_qfq_df)
 
     stock_us_daily_qfq_factor_df = stock_us_daily(symbol="AAPL", adjust="qfq-factor")

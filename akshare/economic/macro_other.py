@@ -51,7 +51,7 @@ def crypto_js_spot() -> pd.DataFrame:
 
 
 def macro_fx_sentiment(
-    start_date: str = "20221011", end_date: str = "20221017"
+    start_date: str | None = None, end_date: str | None = None
 ) -> pd.DataFrame:
     """
     金十数据-外汇-投机情绪报告
@@ -68,6 +68,10 @@ def macro_fx_sentiment(
     :return: 投机情绪报告
     :rtype: pandas.DataFrame
     """
+    if start_date is None:
+        start_date = datetime.now().date().isoformat().replace("-", "")
+    if end_date is None:
+        end_date = start_date
     start_date = "-".join([start_date[:4], start_date[4:6], start_date[6:]])
     end_date = "-".join([end_date[:4], end_date[4:6], end_date[6:]])
     url = "https://datacenter-api.jin10.com/sentiment/datas"
@@ -92,9 +96,31 @@ def macro_fx_sentiment(
         "x-csrf-token": "",
         "x-version": "1.0.0",
     }
-    r = requests.get(url, params=params, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"]["values"]).T
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Jin10 sentiment endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"Jin10 sentiment endpoint returned HTTP {r.status_code}: {url}"
+        )
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Jin10 sentiment endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
+    if data_json.get("status") != 200:
+        raise RuntimeError(
+            f"Jin10 sentiment endpoint returned status {data_json.get('status')}: "
+            f"{data_json.get('message', '')}"
+        )
+    data = data_json.get("data") or {}
+    values = data.get("values") or {}
+    if not values:
+        return pd.DataFrame(columns=["date"] + list(data.get("labels") or []))
+    temp_df = pd.DataFrame(values).T
     temp_df.reset_index(inplace=True)
     temp_df.rename(columns={"index": "date"}, inplace=True)
     for col in temp_df.columns[1:]:

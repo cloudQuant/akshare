@@ -7,11 +7,55 @@ https://www.chinamoney.com.cn/chinese/scsjzqxx/
 """
 
 import functools
+import time
 
 import pandas as pd
 import requests
-from akshare.utils.tqdm import get_tqdm
+
 from akshare.bond.bond_china import bond_china_close_return_map
+from akshare.utils.tqdm import get_tqdm
+
+
+_BOND_INFO_CM_COLUMNS = [
+    "债券简称",
+    "债券代码",
+    "发行人/受托机构",
+    "债券类型",
+    "发行日期",
+    "最新债项评级",
+    "查询代码",
+]
+_BOND_INFO_DETAIL_CM_COLUMNS = ["name", "value"]
+
+
+def _empty_bond_info_cm() -> pd.DataFrame:
+    return pd.DataFrame(columns=_BOND_INFO_CM_COLUMNS)
+
+
+def _empty_bond_info_detail_cm() -> pd.DataFrame:
+    return pd.DataFrame(columns=_BOND_INFO_DETAIL_CM_COLUMNS)
+
+
+def _post_chinamoney_json(
+    session: requests.Session,
+    url: str,
+    payload: dict,
+    headers: dict,
+    retries: int = 5,
+) -> dict:
+    for retry in range(retries):
+        try:
+            r = session.post(url, data=payload, headers=headers, timeout=20)
+            if r.status_code == 421:
+                time.sleep(min(60, 5 * (2**retry)))
+                continue
+            r.raise_for_status()
+            return r.json()
+        except (requests.RequestException, ValueError):
+            if retry == retries - 1:
+                return {}
+            time.sleep(min(60, 5 * (2**retry)))
+    return {}
 
 
 @functools.lru_cache()
@@ -29,7 +73,7 @@ def bond_info_cm_query(symbol: str = "评级等级") -> pd.DataFrame:
         url = "https://www.chinamoney.com.cn/ags/ms/cm-u-bond-md/EntyFullNameSearchCondition"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/109.0.0.0 Safari/537.36"
+                          "Chrome/109.0.0.0 Safari/537.36"
         }
         r = requests.post(url, headers=headers)
         data_json = r.json()
@@ -47,7 +91,7 @@ def bond_info_cm_query(symbol: str = "评级等级") -> pd.DataFrame:
         url = "https://www.chinamoney.com.cn/ags/ms/cm-u-bond-md/BondBaseInfoSearchCondition"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/109.0.0.0 Safari/537.36"
+                          "Chrome/109.0.0.0 Safari/537.36"
         }
         r = requests.post(url, headers=headers)
         data_json = r.json()
@@ -134,19 +178,28 @@ def bond_info_cm(
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/109.0.0.0 Safari/537.36"
+                      "Chrome/109.0.0.0 Safari/537.36"
     }
-    r = requests.post(url, data=payload, headers=headers)
-    data_json = r.json()
-    total_page = data_json["data"]["pageTotal"]
-    big_df = pd.DataFrame()
+    session = requests.Session()
+    data_json = _post_chinamoney_json(session, url, payload, headers)
+    data = data_json.get("data") or {}
+    total_page = int(data.get("pageTotal") or 0)
+    records = data.get("resultList") or []
+    if total_page <= 0 and not records:
+        return _empty_bond_info_cm()
+
+    temp_list = [pd.DataFrame(records)] if records else []
     tqdm = get_tqdm()
-    for page in tqdm(range(1, total_page + 1), leave=False):
+    for page in tqdm(range(2, total_page + 1), leave=False):
         payload.update({"pageNo": page})
-        r = requests.post(url, data=payload, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["data"]["resultList"])
-        big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+        data_json = _post_chinamoney_json(session, url, payload, headers)
+        records = (data_json.get("data") or {}).get("resultList") or []
+        if records:
+            temp_list.append(pd.DataFrame(records))
+    if not temp_list:
+        return _empty_bond_info_cm()
+
+    big_df = pd.concat(temp_list, ignore_index=True)
     big_df.rename(
         columns={
             "bondDefinedCode": "查询代码",
@@ -164,17 +217,10 @@ def bond_info_cm(
         },
         inplace=True,
     )
-    big_df = big_df[
-        [
-            "债券简称",
-            "债券代码",
-            "发行人/受托机构",
-            "债券类型",
-            "发行日期",
-            "最新债项评级",
-            "查询代码",
-        ]
-    ]
+    for column in _BOND_INFO_CM_COLUMNS:
+        if column not in big_df.columns:
+            big_df[column] = pd.NA
+    big_df = big_df[_BOND_INFO_CM_COLUMNS]
     return big_df
 
 
@@ -191,18 +237,25 @@ def bond_info_detail_cm(symbol: str = "淮安农商行CDSD2022021012") -> pd.Dat
     bond_china_close_return_map()
     url = "https://www.chinamoney.com.cn/ags/ms/cm-u-bond-md/BondDetailInfo"
     inner_bond_info_cm_df = bond_info_cm(bond_name=symbol)
+    if inner_bond_info_cm_df.empty or "查询代码" not in inner_bond_info_cm_df.columns:
+        return _empty_bond_info_detail_cm()
     bond_code = inner_bond_info_cm_df["查询代码"].values[0]
     payload = {"bondDefinedCode": bond_code}
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/109.0.0.0 Safari/537.36"
+                      "Chrome/109.0.0.0 Safari/537.36",
+        "host": "www.chinamoney.com.cn",
+        "origin": "https://www.chinamoney.com.cn",
+        "referer": "https://www.chinamoney.com.cn/chinese/zqjc/?bondDefinedCode=egfjh08154",
     }
-    r = requests.post(url, data=payload, headers=headers)
-    data_json = r.json()
-    data_dict = data_json["data"]["bondBaseInfo"]
-    if data_dict["creditRateEntyList"]:
+    session = requests.Session()
+    data_json = _post_chinamoney_json(session, url, payload, headers)
+    data_dict = (data_json.get("data") or {}).get("bondBaseInfo") or {}
+    if not data_dict:
+        return _empty_bond_info_detail_cm()
+    if data_dict.get("creditRateEntyList"):
         del data_dict["creditRateEntyList"]
-    if data_dict["exerciseInfoList"]:
+    if data_dict.get("exerciseInfoList"):
         del data_dict["exerciseInfoList"]
     temp_df = pd.DataFrame.from_dict(data_dict, orient="index")
     temp_df.reset_index(inplace=True)
@@ -223,5 +276,5 @@ if __name__ == "__main__":
     )
     print(bond_info_cm_df)
 
-    bond_info_detail_cm_df = bond_info_detail_cm(symbol="19万林投资CP001")
+    bond_info_detail_cm_df = bond_info_detail_cm(symbol="19渝机电CP002")
     print(bond_info_detail_cm_df)

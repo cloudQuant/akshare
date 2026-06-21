@@ -34,7 +34,7 @@ def _get_ssl_session():
     return session
 
 
-def stock_hold_management_detail_em() -> pd.DataFrame:
+def stock_hold_management_detail_em(max_pages: int = None) -> pd.DataFrame:
     """
     东方财富网-数据中心-特色数据-高管持股-董监高及相关人员持股变动明细
     https://data.eastmoney.com/executive/list.html
@@ -57,9 +57,30 @@ def stock_hold_management_detail_em() -> pd.DataFrame:
         "pageNo": "1",
         "pageNum": "1",
     }
-    r = requests.get(url, params=params)
+    output_columns = [
+        "日期",
+        "代码",
+        "名称",
+        "变动人",
+        "变动股数",
+        "成交均价",
+        "变动金额",
+        "变动原因",
+        "变动比例",
+        "变动后持股数",
+        "持股种类",
+        "董监高人员姓名",
+        "职务",
+        "变动人与董监高的关系",
+        "开始时持有",
+        "结束后持有",
+    ]
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["result"]["pages"]
+    total_page = int((data_json.get("result") or {}).get("pages") or 0)
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update(
@@ -70,11 +91,17 @@ def stock_hold_management_detail_em() -> pd.DataFrame:
                 "pageNum": page,
             }
         )
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        records = (data_json.get("result") or {}).get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
 
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.rename(
         columns={
             "SECURITY_CODE": "代码",
@@ -100,26 +127,7 @@ def stock_hold_management_detail_em() -> pd.DataFrame:
         inplace=True,
     )
 
-    big_df = big_df[
-        [
-            "日期",
-            "代码",
-            "名称",
-            "变动人",
-            "变动股数",
-            "成交均价",
-            "变动金额",
-            "变动原因",
-            "变动比例",
-            "变动后持股数",
-            "持股种类",
-            "董监高人员姓名",
-            "职务",
-            "变动人与董监高的关系",
-            "开始时持有",
-            "结束后持有",
-        ]
-    ]
+    big_df = big_df[output_columns]
     big_df["日期"] = pd.to_datetime(big_df["日期"], errors="coerce").dt.date
     big_df["变动股数"] = pd.to_numeric(big_df["变动股数"], errors="coerce")
     big_df["成交均价"] = pd.to_numeric(big_df["成交均价"], errors="coerce")

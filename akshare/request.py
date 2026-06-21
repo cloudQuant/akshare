@@ -8,7 +8,13 @@ from akshare.utils.context import config
 
 
 def make_request_with_retry_json(
-    url, params=None, headers=None, proxies=None, max_retries=3, retry_delay=1
+    url,
+    params=None,
+    headers=None,
+    proxies=None,
+    max_retries=3,
+    retry_delay=1,
+    timeout=15,
 ):
     """
     发送 HTTP GET 请求，支持重试机制和代理设置。
@@ -26,7 +32,11 @@ def make_request_with_retry_json(
     for attempt in range(max_retries):
         try:
             response = requests.get(
-                url, params=params, headers=headers, proxies=proxies
+                url,
+                params=params,
+                headers=headers,
+                proxies=proxies,
+                timeout=timeout,
             )
             if response.status_code == 200:
                 try:

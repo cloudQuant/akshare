@@ -8,6 +8,7 @@ https://vip.stock.finance.sina.com.cn/mkt/#hs_z
 
 import datetime
 import re
+import time
 
 import pandas as pd
 import requests
@@ -24,6 +25,27 @@ from akshare.utils import demjson
 from akshare.utils.tqdm import get_tqdm
 
 
+_BOND_ZH_HS_SPOT_COLUMNS = [
+    "代码",
+    "名称",
+    "最新价",
+    "涨跌额",
+    "涨跌幅",
+    "买入",
+    "卖出",
+    "昨收",
+    "今开",
+    "最高",
+    "最低",
+    "成交量",
+    "成交额",
+]
+
+
+def _empty_bond_zh_hs_spot() -> pd.DataFrame:
+    return pd.DataFrame(columns=_BOND_ZH_HS_SPOT_COLUMNS)
+
+
 def get_zh_bond_hs_page_count() -> int:
     """
     行情中心首页-债券-沪深债券的总页数
@@ -34,12 +56,36 @@ def get_zh_bond_hs_page_count() -> int:
     params = {
         "node": "hs_z",
     }
-    res = requests.get(zh_sina_bond_hs_count_url, params=params)
-    page_count = int(re.findall(re.compile(r"\d+"), res.text)[0]) / 80
+    try:
+        res = requests.get(zh_sina_bond_hs_count_url, params=params, timeout=15)
+        count_list = re.findall(re.compile(r"\d+"), res.text)
+    except requests.RequestException:
+        return 0
+    if not count_list:
+        return 0
+    page_count = int(count_list[0]) / 80
     if isinstance(page_count, int):
         return page_count
     else:
         return int(page_count) + 1
+
+
+def _fetch_zh_bond_hs_page(payload: dict) -> pd.DataFrame:
+    for retry in range(3):
+        try:
+            r = requests.get(zh_sina_bond_hs_url, params=payload, timeout=15)
+            r.raise_for_status()
+            data_json = demjson.decode(r.text)
+        except Exception:
+            if retry == 2:
+                return pd.DataFrame()
+            time.sleep(1 + retry)
+            continue
+        temp_df = pd.DataFrame(data_json)
+        if temp_df.shape[1] < 20:
+            return pd.DataFrame()
+        return temp_df
+    return pd.DataFrame()
 
 
 def bond_zh_hs_spot(start_page: str = "1", end_page: str = "10") -> pd.DataFrame:
@@ -55,17 +101,22 @@ def bond_zh_hs_spot(start_page: str = "1", end_page: str = "10") -> pd.DataFrame
     """
     page_count = get_zh_bond_hs_page_count()
     page_count = int(page_count)
+    if page_count <= 0:
+        return _empty_bond_zh_hs_spot()
     zh_sina_bond_hs_payload_copy = zh_sina_bond_hs_payload.copy()
     tqdm = get_tqdm()
-    big_df = pd.DataFrame()
+    temp_list = []
     start_page = int(start_page)
-    end_page = int(end_page) + 1 if int(end_page) + 1 <= page_count else page_count
-    for page in tqdm(range(start_page, end_page), leave=False):
+    end_page = min(int(end_page), page_count)
+    for page in tqdm(range(start_page, end_page + 1), leave=False):
         zh_sina_bond_hs_payload_copy.update({"page": page})
-        r = requests.get(zh_sina_bond_hs_url, params=zh_sina_bond_hs_payload_copy)
-        data_json = demjson.decode(r.text)
-        temp_df = pd.DataFrame(data_json)
-        big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+        temp_df = _fetch_zh_bond_hs_page(zh_sina_bond_hs_payload_copy)
+        if temp_df.empty:
+            return _empty_bond_zh_hs_spot()
+        temp_list.append(temp_df)
+    if not temp_list:
+        return _empty_bond_zh_hs_spot()
+    big_df = pd.concat(temp_list, ignore_index=True)
     big_df.columns = [
         "代码",
         "-",
@@ -105,6 +156,8 @@ def bond_zh_hs_spot(start_page: str = "1", end_page: str = "10") -> pd.DataFrame
             "成交额",
         ]
     ]
+    if big_df.empty:
+        return _empty_bond_zh_hs_spot()
     big_df["买入"] = pd.to_numeric(big_df["买入"], errors="coerce")
     big_df["卖出"] = pd.to_numeric(big_df["卖出"], errors="coerce")
     big_df["昨收"] = pd.to_numeric(big_df["昨收"], errors="coerce")
@@ -112,6 +165,10 @@ def bond_zh_hs_spot(start_page: str = "1", end_page: str = "10") -> pd.DataFrame
     big_df["最高"] = pd.to_numeric(big_df["最高"], errors="coerce")
     big_df["最低"] = pd.to_numeric(big_df["最低"], errors="coerce")
     big_df["最新价"] = pd.to_numeric(big_df["最新价"], errors="coerce")
+    big_df["涨跌额"] = pd.to_numeric(big_df["涨跌额"], errors="coerce")
+    big_df["涨跌幅"] = pd.to_numeric(big_df["涨跌幅"], errors="coerce")
+    big_df["成交量"] = pd.to_numeric(big_df["成交量"], errors="coerce")
+    big_df["成交额"] = pd.to_numeric(big_df["成交额"], errors="coerce")
     return big_df
 
 

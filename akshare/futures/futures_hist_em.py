@@ -17,6 +17,8 @@ import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.ssl_ import create_urllib3_context
 
+from akshare.utils.request import request_eastmoney
+
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -164,10 +166,12 @@ def futures_hist_em(
         "ut": "7eea3edcaed734bea9cbfc24409ed989",
         "forcect": "1",
     }
-    r = requests.get(url, timeout=15, params=params)
+    r = request_eastmoney(url, timeout=15, params=params)
     data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    if temp_df.empty: return temp_df
+    klines = (data_json.get("data") or {}).get("klines") or []
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
+    if temp_df.empty:
+        return temp_df
     temp_df.columns = [
         "时间",
         "开盘",

@@ -25,6 +25,75 @@ from akshare.utils.func import fetch_paginated_data
 from akshare.utils.tqdm import get_tqdm
 
 
+_COV_MIN_COLUMNS = ["时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "最新价"]
+_COV_KLINE_COLUMNS = [
+    "时间",
+    "开盘",
+    "收盘",
+    "最高",
+    "最低",
+    "涨跌幅",
+    "涨跌额",
+    "成交量",
+    "成交额",
+    "振幅",
+    "换手率",
+]
+_BOND_COV_COMPARISON_COLUMNS = [
+    "序号",
+    "转债代码",
+    "转债名称",
+    "转债最新价",
+    "转债涨跌幅",
+    "正股代码",
+    "正股名称",
+    "正股最新价",
+    "正股涨跌幅",
+    "转股价",
+    "转股价值",
+    "转股溢价率",
+    "纯债溢价率",
+    "回售触发价",
+    "强赎触发价",
+    "到期赎回价",
+    "纯债价值",
+    "开始转股日",
+    "上市日期",
+    "申购日期",
+]
+
+
+def _request_eastmoney_json(urls: str | list[str], params: dict) -> dict:
+    if isinstance(urls, str):
+        urls = [urls]
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://quote.eastmoney.com/",
+        "Accept": "application/json,text/plain,*/*",
+    }
+    for url in urls:
+        for _ in range(3):
+            try:
+                r = requests.get(url, params=params, headers=headers, timeout=15)
+                r.raise_for_status()
+                return r.json()
+            except (requests.RequestException, ValueError):
+                continue
+    return {}
+
+
+def _empty_cov_min() -> pd.DataFrame:
+    return pd.DataFrame(columns=_COV_MIN_COLUMNS)
+
+
+def _empty_cov_kline() -> pd.DataFrame:
+    return pd.DataFrame(columns=_COV_KLINE_COLUMNS)
+
+
+def _empty_bond_cov_comparison() -> pd.DataFrame:
+    return pd.DataFrame(columns=_BOND_COV_COMPARISON_COLUMNS)
+
+
 def _get_zh_bond_hs_cov_page_count() -> int:
     """
     新浪财经-行情中心-债券-沪深可转债的总页数
@@ -153,7 +222,10 @@ def bond_zh_hs_cov_min(
     """
     market_type = {"sh": "1", "sz": "0"}
     if period == "1":
-        url = "https://push2.eastmoney.com/api/qt/stock/trends2/get"
+        urls = [
+            "https://push2.eastmoney.com/api/qt/stock/trends2/get",
+            "https://push2delay.eastmoney.com/api/qt/stock/trends2/get",
+        ]
         params = {
             "secid": f"{market_type[symbol[:2]]}.{symbol[2:]}",
             "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
@@ -163,21 +235,16 @@ def bond_zh_hs_cov_min(
             "ut": "f057cbcbce2a86e2866ab8877db1d059",
             "ndays": "1",
         }
-        r = requests.get(url, params=params)
-        data_json = r.json()
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["trends"]]
-        )
-        temp_df.columns = [
-            "时间",
-            "开盘",
-            "收盘",
-            "最高",
-            "最低",
-            "成交量",
-            "成交额",
-            "最新价",
-        ]
+        data_json = _request_eastmoney_json(urls, params)
+        data = data_json.get("data") if isinstance(data_json, dict) else None
+        trends = data.get("trends") if isinstance(data, dict) else None
+        if not trends:
+            return _empty_cov_min()
+        temp_df = pd.DataFrame([item.split(",") for item in trends])
+        if temp_df.shape[1] < len(_COV_MIN_COLUMNS):
+            return _empty_cov_min()
+        temp_df = temp_df.iloc[:, : len(_COV_MIN_COLUMNS)]
+        temp_df.columns = _COV_MIN_COLUMNS
         temp_df.index = pd.to_datetime(temp_df["时间"])
         temp_df = temp_df[start_date:end_date]
         temp_df.reset_index(drop=True, inplace=True)
@@ -198,7 +265,10 @@ def bond_zh_hs_cov_min(
             "qfq": "1",
             "hfq": "2",
         }
-        url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+        urls = [
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+            "https://push2delay.eastmoney.com/api/qt/stock/kline/get",
+        ]
         params = {
             "secid": f"{market_type[symbol[:2]]}.{symbol[2:]}",
             "klt": period,
@@ -211,11 +281,15 @@ def bond_zh_hs_cov_min(
             "ut": "7eea3edcaed734bea9cbfc24409ed989",
             "forcect": "1",
         }
-        r = requests.get(url, params=params)
-        data_json = r.json()
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
-        )
+        data_json = _request_eastmoney_json(urls, params)
+        data = data_json.get("data") if isinstance(data_json, dict) else None
+        klines = data.get("klines") if isinstance(data, dict) else None
+        if not klines:
+            return _empty_cov_kline()
+        temp_df = pd.DataFrame([item.split(",") for item in klines])
+        if temp_df.shape[1] < len(_COV_KLINE_COLUMNS):
+            return _empty_cov_kline()
+        temp_df = temp_df.iloc[:, : len(_COV_KLINE_COLUMNS)]
         temp_df.columns = [
             "时间",
             "开盘",
@@ -271,7 +345,10 @@ def bond_zh_hs_cov_pre_min(symbol: str = "sh113570") -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     market_type = {"sh": "1", "sz": "0"}
-    url = "https://push2.eastmoney.com/api/qt/stock/trends2/get"
+    urls = [
+        "https://push2.eastmoney.com/api/qt/stock/trends2/get",
+        "https://push2delay.eastmoney.com/api/qt/stock/trends2/get",
+    ]
     params = {
         "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58",
@@ -280,35 +357,16 @@ def bond_zh_hs_cov_pre_min(symbol: str = "sh113570") -> pd.DataFrame:
         "iscca": "0",
         "secid": f"{market_type[symbol[:2]]}.{symbol[2:]}",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
+    data_json = _request_eastmoney_json(urls, params)
     if not data_json.get("data") or not data_json["data"].get("trends"):
-        temp_df = pd.DataFrame(
-            columns=[
-                "时间",
-                "开盘",
-                "收盘",
-                "最高",
-                "最低",
-                "成交量",
-                "成交额",
-                "最新价",
-            ]
-        )
-        return temp_df
+        return _empty_cov_min()
     temp_df = pd.DataFrame(
         [item.split(",") for item in data_json["data"]["trends"]]
     )
-    temp_df.columns = [
-        "时间",
-        "开盘",
-        "收盘",
-        "最高",
-        "最低",
-        "成交量",
-        "成交额",
-        "最新价",
-    ]
+    if temp_df.shape[1] < len(_COV_MIN_COLUMNS):
+        return _empty_cov_min()
+    temp_df = temp_df.iloc[:, : len(_COV_MIN_COLUMNS)]
+    temp_df.columns = _COV_MIN_COLUMNS
     temp_df.index = pd.to_datetime(temp_df["时间"])
     temp_df.reset_index(drop=True, inplace=True)
     temp_df["开盘"] = pd.to_numeric(temp_df["开盘"], errors="coerce")
@@ -338,10 +396,10 @@ def bond_zh_cov() -> pd.DataFrame:
         "reportName": "RPT_BOND_CB_LIST",
         "columns": "ALL",
         "quoteColumns": "f2~01~CONVERT_STOCK_CODE~CONVERT_STOCK_PRICE,"
-                        "f235~10~SECURITY_CODE~TRANSFER_PRICE,f236~10~SECURITY_CODE~TRANSFER_VALUE,"
-                        "f2~10~SECURITY_CODE~CURRENT_BOND_PRICE,f237~10~SECURITY_CODE~TRANSFER_PREMIUM_RATIO,"
-                        "f239~10~SECURITY_CODE~RESALE_TRIG_PRICE,f240~10~SECURITY_CODE~REDEEM_TRIG_PRICE,"
-                        "f23~01~CONVERT_STOCK_CODE~PBV_RATIO",
+        "f235~10~SECURITY_CODE~TRANSFER_PRICE,f236~10~SECURITY_CODE~TRANSFER_VALUE,"
+        "f2~10~SECURITY_CODE~CURRENT_BOND_PRICE,f237~10~SECURITY_CODE~TRANSFER_PREMIUM_RATIO,"
+        "f239~10~SECURITY_CODE~RESALE_TRIG_PRICE,f240~10~SECURITY_CODE~REDEEM_TRIG_PRICE,"
+        "f23~01~CONVERT_STOCK_CODE~PBV_RATIO",
         "source": "WEB",
         "client": "WEB",
     }
@@ -485,7 +543,10 @@ def bond_cov_comparison() -> pd.DataFrame:
     :return: 可转债比价表数据
     :rtype: pandas.DataFrame
     """
-    url = "https://16.push2.eastmoney.com/api/qt/clist/get"
+    urls = [
+        "https://16.push2.eastmoney.com/api/qt/clist/get",
+        "https://push2delay.eastmoney.com/api/qt/clist/get",
+    ]
     params = {
         "pn": "1",
         "pz": "100",
@@ -497,27 +558,57 @@ def bond_cov_comparison() -> pd.DataFrame:
         "fid": "f243",
         "fs": "b:MK0354",
         "fields": "f1,f152,f2,f3,f12,f13,f14,f227,f228,f229,f230,f231,f232,f233,f234,"
-                  "f235,f236,f237,f238,f239,f240,f241,f242,f26,f243",
+        "f235,f236,f237,f238,f239,f240,f241,f242,f26,f243",
     }
-    temp_df = fetch_paginated_data(url, params)
-    temp_df.columns = [
+    temp_df = pd.DataFrame()
+    for url in urls:
+        try:
+            temp_df = fetch_paginated_data(url, params)
+        except RuntimeError:
+            continue
+        if not temp_df.empty:
+            break
+
+    if temp_df.empty:
+        return _empty_bond_cov_comparison()
+
+    if not {"f12", "f14"}.issubset(temp_df.columns):
+        return _empty_bond_cov_comparison()
+
+    result_df = pd.DataFrame()
+    result_df["序号"] = temp_df.get(
+        "index", pd.Series(range(1, len(temp_df) + 1), index=temp_df.index)
+    )
+    field_map = {
+        "转债代码": "f12",
+        "转债名称": "f14",
+        "转债最新价": "f2",
+        "转债涨跌幅": "f3",
+        "正股代码": "f232",
+        "正股名称": "f234",
+        "正股最新价": "f235",
+        "正股涨跌幅": "f237",
+        "转股价": "f229",
+        "转股价值": "f236",
+        "转股溢价率": "f230",
+        "纯债溢价率": "f238",
+        "回售触发价": "f239",
+        "强赎触发价": "f240",
+        "到期赎回价": "f241",
+        "纯债价值": "f228",
+        "开始转股日": "f242",
+        "上市日期": "f26",
+        "申购日期": "f243",
+    }
+    for column, field in field_map.items():
+        result_df[column] = temp_df[field] if field in temp_df.columns else pd.NA
+
+    numeric_columns = [
         "序号",
-        "_",
         "转债最新价",
         "转债涨跌幅",
-        "转债代码",
-        "_",
-        "转债名称",
-        "上市日期",
-        "_",
-        "纯债价值",
-        "_",
         "正股最新价",
         "正股涨跌幅",
-        "_",
-        "正股代码",
-        "_",
-        "正股名称",
         "转股价",
         "转股价值",
         "转股溢价率",
@@ -525,34 +616,11 @@ def bond_cov_comparison() -> pd.DataFrame:
         "回售触发价",
         "强赎触发价",
         "到期赎回价",
-        "开始转股日",
-        "申购日期",
+        "纯债价值",
     ]
-    temp_df = temp_df[
-        [
-            "序号",
-            "转债代码",
-            "转债名称",
-            "转债最新价",
-            "转债涨跌幅",
-            "正股代码",
-            "正股名称",
-            "正股最新价",
-            "正股涨跌幅",
-            "转股价",
-            "转股价值",
-            "转股溢价率",
-            "纯债溢价率",
-            "回售触发价",
-            "强赎触发价",
-            "到期赎回价",
-            "纯债价值",
-            "开始转股日",
-            "上市日期",
-            "申购日期",
-        ]
-    ]
-    return temp_df
+    for column in numeric_columns:
+        result_df[column] = pd.to_numeric(result_df[column], errors="coerce")
+    return result_df[_BOND_COV_COMPARISON_COLUMNS]
 
 
 def bond_zh_cov_info(
@@ -579,9 +647,9 @@ def bond_zh_cov_info(
         "reportName": "RPT_BOND_CB_LIST",
         "columns": "ALL",
         "quoteColumns": "f2~01~CONVERT_STOCK_CODE~CONVERT_STOCK_PRICE,f235~10~SECURITY_CODE~TRANSFER_PRICE,"
-                        "f236~10~SECURITY_CODE~TRANSFER_VALUE,f2~10~SECURITY_CODE~CURRENT_BOND_PRICE,"
-                        "f237~10~SECURITY_CODE~TRANSFER_PREMIUM_RATIO,f239~10~SECURITY_CODE~RESALE_TRIG_PRICE,"
-                        "f240~10~SECURITY_CODE~REDEEM_TRIG_PRICE,f23~01~CONVERT_STOCK_CODE~PBV_RATIO",
+        "f236~10~SECURITY_CODE~TRANSFER_VALUE,f2~10~SECURITY_CODE~CURRENT_BOND_PRICE,"
+        "f237~10~SECURITY_CODE~TRANSFER_PREMIUM_RATIO,f239~10~SECURITY_CODE~RESALE_TRIG_PRICE,"
+        "f240~10~SECURITY_CODE~REDEEM_TRIG_PRICE,f23~01~CONVERT_STOCK_CODE~PBV_RATIO",
         "quoteType": "0",
         "source": "WEB",
         "client": "WEB",
@@ -592,9 +660,9 @@ def bond_zh_cov_info(
             {
                 "reportName": indicator_map[indicator],
                 "quoteColumns": "f2~01~CONVERT_STOCK_CODE~CONVERT_STOCK_PRICE,f235~10~SECURITY_CODE~TRANSFER_PRICE,"
-                                "f236~10~SECURITY_CODE~TRANSFER_VALUE,f2~10~SECURITY_CODE~CURRENT_BOND_PRICE,"
-                                "f237~10~SECURITY_CODE~TRANSFER_PREMIUM_RATIO,f239~10~SECURITY_CODE~RESALE_TRIG_PRICE,"
-                                "f240~10~SECURITY_CODE~REDEEM_TRIG_PRICE,f23~01~CONVERT_STOCK_CODE~PBV_RATIO",
+                "f236~10~SECURITY_CODE~TRANSFER_VALUE,f2~10~SECURITY_CODE~CURRENT_BOND_PRICE,"
+                "f237~10~SECURITY_CODE~TRANSFER_PREMIUM_RATIO,f239~10~SECURITY_CODE~RESALE_TRIG_PRICE,"
+                "f240~10~SECURITY_CODE~REDEEM_TRIG_PRICE,f23~01~CONVERT_STOCK_CODE~PBV_RATIO",
             }
         )
         r = requests.get(url, params=params)

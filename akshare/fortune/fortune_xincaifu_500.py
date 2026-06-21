@@ -12,6 +12,23 @@ import pandas as pd
 import requests
 
 
+_XINCAIFU_RANK_COLUMNS = [
+    "排名",
+    "财富",
+    "姓名",
+    "主要公司",
+    "相关行业",
+    "公司总部",
+    "性别",
+    "年龄",
+    "年份",
+]
+
+
+def _empty_xincaifu_rank() -> pd.DataFrame:
+    return pd.DataFrame(columns=_XINCAIFU_RANK_COLUMNS)
+
+
 def xincaifu_rank(year: str = "2022") -> pd.DataFrame:
     """
     新财富 500 人富豪榜
@@ -34,10 +51,19 @@ def xincaifu_rank(year: str = "2022") -> pd.DataFrame:
         "pageNo": "1",
         "from": "jsonp",
     }
-    r = requests.get(url, params=params)
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+    except requests.RequestException:
+        return _empty_xincaifu_rank()
     data_text = r.text
-    data_json = json.loads(data_text[data_text.find("{") : -1])
-    temp_df = pd.DataFrame(data_json["data"]["rows"])
+    try:
+        data_json = json.loads(data_text[data_text.find("{") : -1])
+        temp_df = pd.DataFrame(data_json["data"]["rows"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return _empty_xincaifu_rank()
+    if temp_df.empty:
+        return _empty_xincaifu_rank()
     temp_df.columns
     temp_df.rename(
         columns={
@@ -55,19 +81,10 @@ def xincaifu_rank(year: str = "2022") -> pd.DataFrame:
         },
         inplace=True,
     )
-    temp_df = temp_df[
-        [
-            "排名",
-            "财富",
-            "姓名",
-            "主要公司",
-            "相关行业",
-            "公司总部",
-            "性别",
-            "年龄",
-            "年份",
-        ]
-    ]
+    try:
+        temp_df = temp_df[_XINCAIFU_RANK_COLUMNS]
+    except KeyError:
+        return _empty_xincaifu_rank()
     return temp_df
 
 

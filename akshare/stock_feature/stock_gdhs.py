@@ -12,7 +12,7 @@ import requests
 from akshare.utils.tqdm import get_tqdm
 
 
-def stock_zh_a_gdhs(symbol: str = "20230930") -> pd.DataFrame:
+def stock_zh_a_gdhs(symbol: str = "20230930", max_pages: int = None) -> pd.DataFrame:
     """
     东方财富网-数据中心-特色数据-股东户数
     https://data.eastmoney.com/gdhs/
@@ -51,9 +51,30 @@ def stock_zh_a_gdhs(symbol: str = "20230930") -> pd.DataFrame:
             "client": "WEB",
             "filter": f"(END_DATE='{symbol[:4] + '-' + symbol[4:6] + '-' + symbol[6:]}')",
         }
-    r = requests.get(url, params=params)
+    output_columns = [
+        "代码",
+        "名称",
+        "最新价",
+        "涨跌幅",
+        "股东户数-本次",
+        "股东户数-上次",
+        "股东户数-增减",
+        "股东户数-增减比例",
+        "区间涨跌幅",
+        "股东户数统计截止日-本次",
+        "股东户数统计截止日-上次",
+        "户均持股市值",
+        "户均持股数量",
+        "总市值",
+        "总股本",
+        "公告日期",
+    ]
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page_num = data_json["result"]["pages"]
+    total_page_num = int((data_json.get("result") or {}).get("pages") or 0)
+    if max_pages is not None:
+        total_page_num = min(total_page_num, int(max_pages))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page_num in tqdm(range(1, total_page_num + 1), leave=False):
@@ -62,10 +83,16 @@ def stock_zh_a_gdhs(symbol: str = "20230930") -> pd.DataFrame:
                 "pageNumber": page_num,
             }
         )
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        records = (data_json.get("result") or {}).get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.columns = [
         "代码",
         "名称",
@@ -84,26 +111,7 @@ def stock_zh_a_gdhs(symbol: str = "20230930") -> pd.DataFrame:
         "最新价",
         "涨跌幅",
     ]
-    big_df = big_df[
-        [
-            "代码",
-            "名称",
-            "最新价",
-            "涨跌幅",
-            "股东户数-本次",
-            "股东户数-上次",
-            "股东户数-增减",
-            "股东户数-增减比例",
-            "区间涨跌幅",
-            "股东户数统计截止日-本次",
-            "股东户数统计截止日-上次",
-            "户均持股市值",
-            "户均持股数量",
-            "总市值",
-            "总股本",
-            "公告日期",
-        ]
-    ]
+    big_df = big_df[output_columns]
     big_df["最新价"] = pd.to_numeric(big_df["最新价"], errors="coerce")
     big_df["涨跌幅"] = pd.to_numeric(big_df["涨跌幅"], errors="coerce")
     big_df["股东户数-本次"] = pd.to_numeric(big_df["股东户数-本次"], errors="coerce")
@@ -223,7 +231,7 @@ def stock_zh_a_gdhs_detail_em(symbol: str = "000001") -> pd.DataFrame:
     big_df["股东户数公告日期"] = pd.to_datetime(
         big_df["股东户数公告日期"], errors="coerce"
     ).dt.date
-    big_df.sort_values(by=['股东户数统计截止日'], ignore_index=True, inplace=True)
+    big_df.sort_values(by=["股东户数统计截止日"], ignore_index=True, inplace=True)
     return big_df
 
 

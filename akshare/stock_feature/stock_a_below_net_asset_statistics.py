@@ -35,16 +35,32 @@ def stock_a_below_net_asset_statistics(symbol: str = "全部A股") -> pd.DataFra
     r = requests.get(url, params=params, headers=headers)
     data_json = r.json()
     temp_df = pd.DataFrame(data_json)
-    temp_df["date"] = pd.to_datetime(temp_df["date"], unit="ms").dt.date
-    del temp_df["marketId"]
-    big_df = temp_df.iloc[:, :3]
-    big_df.columns = ["below_net_asset", "total_company", "date"]
+    columns = ["date", "below_net_asset", "total_company", "below_net_asset_ratio"]
+    if temp_df.empty:
+        return pd.DataFrame(columns=columns)
+    temp_df.rename(
+        columns={
+            "belowNetAsset": "below_net_asset",
+            "totalCompany": "total_company",
+            "below_net_asset": "below_net_asset",
+            "total_company": "total_company",
+        },
+        inplace=True,
+    )
+    required_columns = {"below_net_asset", "total_company", "date"}
+    if not required_columns.issubset(temp_df.columns):
+        return pd.DataFrame(columns=columns)
+
+    big_df = temp_df[["date", "below_net_asset", "total_company"]].copy()
+    date_numeric = pd.to_numeric(big_df["date"], errors="coerce")
+    if date_numeric.notna().all():
+        big_df["date"] = pd.to_datetime(date_numeric, unit="ms", errors="coerce").dt.date
+    else:
+        big_df["date"] = pd.to_datetime(big_df["date"], errors="coerce").dt.date
     big_df["below_net_asset_ratio"] = round(
         big_df["below_net_asset"] / big_df["total_company"], 4
     )
-    big_df = big_df[
-        ["date", "below_net_asset", "total_company", "below_net_asset_ratio"]
-    ]
+    big_df = big_df[columns]
     big_df["date"] = pd.to_datetime(big_df["date"], errors="coerce").dt.date
     big_df["below_net_asset"] = pd.to_numeric(
         big_df["below_net_asset"], errors="coerce"

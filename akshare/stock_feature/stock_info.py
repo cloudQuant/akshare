@@ -6,6 +6,7 @@ Desc: 东方财富-财经早餐
 https://stock.eastmoney.com/a/czpnc.html
 """
 
+import hashlib
 from datetime import datetime
 
 import pandas as pd
@@ -13,6 +14,26 @@ import requests
 
 from akshare.request import make_request_with_retry_json
 from akshare.utils.cons import headers
+
+
+def _cls_signed_params(params: dict) -> dict:
+    """
+    财联社 Web 端请求签名: md5(sha1(sorted query string)).
+    """
+    signed_params = {
+        **params,
+        "os": "web",
+        "sv": "8.7.9",
+        "app": params.get("app", "CailianpressWeb"),
+    }
+    query = "&".join(
+        f"{key}={signed_params[key]}"
+        for key in sorted(signed_params, key=lambda item: item.upper())
+        if signed_params[key] is not None
+    )
+    sha1_value = hashlib.sha1(query.encode("utf-8")).hexdigest()
+    signed_params["sign"] = hashlib.md5(sha1_value.encode("utf-8")).hexdigest()
+    return signed_params
 
 
 def stock_info_cjzc_em() -> pd.DataFrame:
@@ -134,7 +155,7 @@ def stock_info_global_futu() -> pd.DataFrame:
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
-                      " Chrome/111.0.0.0 Safari/537.36"
+        " Chrome/111.0.0.0 Safari/537.36"
     }
     r = requests.get(url, params=params, headers=headers)
     data_json = r.json()
@@ -198,8 +219,23 @@ def stock_info_global_cls(symbol: str = "全部") -> pd.DataFrame:
     :return: 财联社-电报
     :rtype: pandas.DataFrame
     """
-    url = "https://www.cls.cn/nodeapi/telegraphList"
-    data_json = make_request_with_retry_json(url, max_retries=10, headers=headers)
+    url = "https://www.cls.cn/api/cache"
+    params = _cls_signed_params({"name": "telegraph"})
+    request_headers = headers.copy()
+    request_headers.update(
+        {
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.cls.cn/telegraph",
+        }
+    )
+    try:
+        data_json = make_request_with_retry_json(
+            url, params=params, max_retries=2, headers=request_headers, timeout=15
+        )
+    except Exception as exc:
+        raise RuntimeError(f"CLS telegraph endpoint request failed: {url}") from exc
+    if not data_json.get("data") or "roll_data" not in data_json["data"]:
+        raise RuntimeError(f"CLS telegraph endpoint returned unexpected data: {url}")
     temp_df = pd.DataFrame(data_json["data"]["roll_data"])
     big_df = temp_df.copy()
     big_df = big_df[["title", "content", "ctime", "level"]]

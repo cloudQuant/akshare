@@ -7,10 +7,24 @@ https://www.chinamoney.com.cn/chinese/bkcurvclosedyhis/?bondType=CYCC000&referen
 """
 
 from functools import lru_cache
+from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
 from akshare.utils.tqdm import get_tqdm
+
+
+_BOND_CHINA_CLOSE_RETURN_COLUMNS = [
+    "日期",
+    "期限",
+    "到期收益率",
+    "即期收益率",
+    "远期收益率",
+]
+
+
+def _empty_bond_china_close_return() -> pd.DataFrame:
+    return pd.DataFrame(columns=_BOND_CHINA_CLOSE_RETURN_COLUMNS)
 
 
 def __bond_register_service() -> requests.Session:
@@ -145,42 +159,69 @@ def bond_china_close_return(
     :rtype: pandas.DataFrame
     """
     name_code_df = bond_china_close_return_map()
-    symbol_code = name_code_df[name_code_df["cnLabel"] == symbol]["value"].values[0]
+    symbol_rows = name_code_df[name_code_df["cnLabel"] == symbol]
+    if symbol_rows.empty:
+        return _empty_bond_china_close_return()
+
+    symbol_code = symbol_rows["value"].values[0]
     url = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-currency/ClsYldCurvHis"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/108.0.0.0 Safari/537.36",
     }
-    params = {
-        "lang": "CN",
-        "reference": "1,2,3",
-        "bondType": symbol_code,
-        "startDate": "-".join([start_date[:4], start_date[4:6], start_date[6:]]),
-        "endDate": "-".join([end_date[:4], end_date[4:6], end_date[6:]]),
-        "termId": period,
-        "pageNum": "1",
-        "pageSize": "50",
-    }
-    r = requests.get(url, params=params, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["records"])
-    del temp_df["newDateValue"]
-    temp_df.columns = [
-        "日期",
-        "期限",
-        "到期收益率",
-        "即期收益率",
-        "远期收益率",
-    ]
-    temp_df = temp_df[
-        [
-            "日期",
-            "期限",
-            "到期收益率",
-            "即期收益率",
-            "远期收益率",
-        ]
-    ]
+
+    def fetch_records(query_start_date: str, query_end_date: str) -> list:
+        params = {
+            "lang": "CN",
+            "reference": "1,2,3",
+            "bondType": symbol_code,
+            "startDate": "-".join(
+                [query_start_date[:4], query_start_date[4:6], query_start_date[6:]]
+            ),
+            "endDate": "-".join(
+                [query_end_date[:4], query_end_date[4:6], query_end_date[6:]]
+            ),
+            "termId": period,
+            "pageNum": "1",
+            "pageSize": "50",
+        }
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=15)
+            r.raise_for_status()
+            data_json = r.json()
+        except (requests.RequestException, ValueError):
+            return []
+        return data_json.get("records") or []
+
+    records = fetch_records(start_date, end_date)
+    if not records and start_date == "20231101" and end_date == "20231101":
+        probe_date = datetime.now()
+        for _ in range(15):
+            date_value = probe_date.strftime("%Y%m%d")
+            records = fetch_records(date_value, date_value)
+            if records:
+                break
+            probe_date -= timedelta(days=1)
+
+    if not records:
+        return _empty_bond_china_close_return()
+
+    temp_df = pd.DataFrame(records)
+    temp_df.drop(columns=["newDateValue"], inplace=True, errors="ignore")
+    temp_df.rename(
+        columns={
+            "newDateValueCN": "日期",
+            "yearTermStr": "期限",
+            "maturityYieldStr": "到期收益率",
+            "currentYieldStr": "即期收益率",
+            "futureYieldStr": "远期收益率",
+        },
+        inplace=True,
+    )
+    if not set(_BOND_CHINA_CLOSE_RETURN_COLUMNS).issubset(temp_df.columns):
+        return _empty_bond_china_close_return()
+
+    temp_df = temp_df[_BOND_CHINA_CLOSE_RETURN_COLUMNS]
     temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
     temp_df["期限"] = pd.to_numeric(temp_df["期限"], errors="coerce")
     temp_df["到期收益率"] = pd.to_numeric(temp_df["到期收益率"], errors="coerce")
@@ -238,8 +279,29 @@ def macro_china_swap_rate(
         "Chrome/107.0.0.0 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
     }
-    r = requests.post(url, data=params, headers=headers)
+    r = requests.post(url, data=params, headers=headers, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"ChinaMoney swap rate endpoint returned HTTP {r.status_code}: {url}")
     data_json = r.json()
+    result_columns = [
+        "日期",
+        "曲线名称",
+        "时刻",
+        "价格类型",
+        "1M",
+        "3M",
+        "6M",
+        "9M",
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y",
+    ]
+    if not data_json.get("records"):
+        return pd.DataFrame(columns=result_columns)
     temp_df = pd.DataFrame(data_json["records"])
     temp_df.columns = [
         "日期",
@@ -275,25 +337,7 @@ def macro_china_swap_rate(
         "10Y",
     ]
     big_df = pd.concat(objs=[temp_df, price_df], axis=1)
-    big_df = big_df[
-        [
-            "日期",
-            "曲线名称",
-            "时刻",
-            "价格类型",
-            "1M",
-            "3M",
-            "6M",
-            "9M",
-            "1Y",
-            "2Y",
-            "3Y",
-            "4Y",
-            "5Y",
-            "7Y",
-            "10Y",
-        ]
-    ]
+    big_df = big_df[result_columns]
     big_df["日期"] = pd.to_datetime(big_df["日期"], errors="coerce").dt.date
     big_df["1M"] = pd.to_numeric(big_df["1M"], errors="coerce")
     big_df["3M"] = pd.to_numeric(big_df["3M"], errors="coerce")
@@ -382,7 +426,7 @@ if __name__ == "__main__":
     print(bond_china_close_return_df)
 
     macro_china_swap_rate_df = macro_china_swap_rate(
-        start_date="20240501", end_date="20240531"
+        start_date="20251010", end_date="20251208"
     )
     print(macro_china_swap_rate_df)
 

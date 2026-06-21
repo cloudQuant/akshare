@@ -11,6 +11,8 @@ https://investor.szse.cn/market/option/day/index.html
 import pandas as pd
 import requests
 
+from akshare.utils.request import request_szse
+
 
 def option_daily_stats_sse(date: str = "20240626") -> pd.DataFrame:
     """
@@ -99,7 +101,7 @@ def option_daily_stats_szse(date: str = "20240626") -> pd.DataFrame:
         "txtQueryDate": "-".join([date[:4], date[4:6], date[6:]]),
         "random": "0.0652692406565949",
     }
-    r = requests.get(url, params=params)
+    r = request_szse(url, params=params, timeout=30)
     data_json = r.json()
     temp_df = pd.DataFrame(data_json[0]["data"])
     temp_df.rename(

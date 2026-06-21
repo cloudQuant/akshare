@@ -22,7 +22,14 @@ def stock_industry_clf_hist_sw() -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     url = "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"  # 此处为 https
-    r = requests.get(url, headers=headers)
+    try:
+        r = requests.get(url, headers=headers, timeout=20, verify=False)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"SWS industry classify endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"SWS industry classify endpoint returned HTTP {r.status_code}: {url}"
+        )
     temp_df = pd.read_excel(
         io.BytesIO(r.content), dtype={"股票代码": "str", "行业代码": "str"}
     )

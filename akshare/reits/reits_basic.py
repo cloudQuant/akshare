@@ -13,6 +13,22 @@ from typing import Dict
 import pandas as pd
 import requests
 
+from akshare.utils.request import request_eastmoney
+
+
+def _get_eastmoney_reits_json(url: str, params: dict, endpoint_name: str) -> dict:
+    try:
+        r = request_eastmoney(url, params=params, timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Eastmoney REITs {endpoint_name} request failed: {url}") from exc
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Eastmoney REITs {endpoint_name} returned invalid JSON: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
+
 
 @lru_cache()
 def __reits_code_market_map() -> Dict:
@@ -35,9 +51,11 @@ def __reits_code_market_map() -> Dict:
         "fs": "m:1 t:9 e:97,m:0 t:10 e:97",
         "fields": "f12,f13",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"]["diff"])
+    data_json = _get_eastmoney_reits_json(url, params, "code map")
+    records = (data_json.get("data") or {}).get("diff") or []
+    if not records:
+        return {}
+    temp_df = pd.DataFrame(records)
     temp_dict = dict(zip(temp_df["f12"], temp_df["f13"]))
     return temp_dict
 
@@ -62,9 +80,11 @@ def reits_realtime_em() -> pd.DataFrame:
         "fs": "m:1 t:9 e:97,m:0 t:10 e:97",
         "fields": "f2,f3,f4,f5,f6,f12,f14,f15,f16,f17,f18",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"]["diff"])
+    data_json = _get_eastmoney_reits_json(url, params, "realtime")
+    records = (data_json.get("data") or {}).get("diff") or []
+    if not records:
+        return pd.DataFrame()
+    temp_df = pd.DataFrame(records)
     temp_df.reset_index(inplace=True)
     temp_df["index"] = range(1, len(temp_df) + 1)
     temp_df.rename(
@@ -136,10 +156,9 @@ def reits_hist_em(symbol: str = "508097") -> pd.DataFrame:
         "ut": "f057cbcbce2a86e2866ab8877db1d059",
         "forcect": "1",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    temp_df.columns = [
+    data_json = _get_eastmoney_reits_json(url, params, "history")
+    klines = (data_json.get("data") or {}).get("klines") or []
+    columns = [
         "日期",
         "今开",
         "最新价",
@@ -155,6 +174,10 @@ def reits_hist_em(symbol: str = "508097") -> pd.DataFrame:
         "-",
         "-",
     ]
+    if not klines:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
+    temp_df.columns = columns
     temp_df = temp_df[
         ["日期", "今开", "最高", "最低", "最新价", "成交量", "成交额", "振幅", "换手"]
     ]
@@ -190,10 +213,9 @@ def reits_hist_min_em(symbol: str = "508097") -> pd.DataFrame:
         "ut": "f057cbcbce2a86e2866ab8877db1d059",
         "ndays": "5",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["trends"]])
-    temp_df.columns = [
+    data_json = _get_eastmoney_reits_json(url, params, "minute history")
+    trends = (data_json.get("data") or {}).get("trends") or []
+    columns = [
         "时间",
         "最新价",
         "最高",
@@ -202,6 +224,10 @@ def reits_hist_min_em(symbol: str = "508097") -> pd.DataFrame:
         "成交额",
         "昨收",
     ]
+    if not trends:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame([item.split(",") for item in trends])
+    temp_df.columns = columns
 
     temp_df["最高"] = pd.to_numeric(temp_df["最高"], errors="coerce")
     temp_df["最低"] = pd.to_numeric(temp_df["最低"], errors="coerce")

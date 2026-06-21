@@ -21,9 +21,12 @@ def __get_sys_spot_futures_dict() -> dict:
     :rtype: dict
     """
     url = "https://www.100ppi.com/sf/792.html"
-    res = requests.get(url)
+    res = requests.get(url, timeout=15)
     soup = BeautifulSoup(res.text, features="lxml")
-    temp_item = soup.find(name="div", attrs={"class": "q8"}).find_all("li")
+    item_container = soup.find(name="div", attrs={"class": "q8"})
+    if item_container is None:
+        return {}
+    temp_item = item_container.find_all("li")
     name_url_dict = dict(
         zip(
             [item.find("a").get_text().strip() for item in temp_item],
@@ -45,10 +48,18 @@ def futures_spot_sys(symbol: str = "铜", indicator: str = "市场价格") -> pd
     :rtype: dict
     """
     name_url_dict = __get_sys_spot_futures_dict()
+    if symbol not in name_url_dict:
+        return pd.DataFrame()
     url = name_url_dict[symbol]
-    r = requests.get("https://www.100ppi.com" + url)
+    r = requests.get("https://www.100ppi.com" + url, timeout=15)
+    try:
+        tables = pd.read_html(StringIO(r.text), header=0, index_col=0)
+    except ValueError:
+        return pd.DataFrame()
     if indicator == "市场价格":
-        table_df_one = pd.read_html(StringIO(r.text), header=0, index_col=0)[1].T
+        if len(tables) <= 1:
+            return pd.DataFrame()
+        table_df_one = tables[1].T
         table_df_one["现货价格"] = pd.to_numeric(
             table_df_one["现货价格"], errors="coerce"
         )
@@ -63,7 +74,9 @@ def futures_spot_sys(symbol: str = "铜", indicator: str = "市场价格") -> pd
         table_df_one.rename(columns={"index": "日期"}, inplace=True)
         return table_df_one
     elif indicator == "基差率":
-        table_df_two = pd.read_html(StringIO(r.text), header=0, index_col=0)[2].T
+        if len(tables) <= 2:
+            return pd.DataFrame()
+        table_df_two = tables[2].T
         table_df_two["基差率"] = table_df_two["基差率"].str.replace("%", "")
         table_df_two["基差率"] = pd.to_numeric(table_df_two["基差率"], errors="coerce")
         table_df_two.reset_index(inplace=True)
@@ -71,7 +84,9 @@ def futures_spot_sys(symbol: str = "铜", indicator: str = "市场价格") -> pd
         table_df_two.rename(columns={"index": "日期"}, inplace=True)
         return table_df_two
     else:
-        table_df_three = pd.read_html(StringIO(r.text), header=0, index_col=0)[3].T
+        if len(tables) <= 3:
+            return pd.DataFrame()
+        table_df_three = tables[3].T
         table_df_three["主力基差"] = pd.to_numeric(
             table_df_three["主力基差"], errors="coerce"
         )

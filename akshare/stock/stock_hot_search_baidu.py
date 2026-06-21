@@ -29,11 +29,13 @@ def stock_hot_search_baidu(
     """
     hour_str = datetime.now().hour
     symbol_map = {
+        "全部": "all",
         "全市场": "all",
         "A股": "ab",
         "港股": "hk",
         "美股": "us",
     }
+    columns = ["名称/代码", "涨跌幅", "综合热度"]
     url = "https://finance.pae.baidu.com/selfselect/listsugrecomm"
     params = {
         "bizType": "wisexmlnew",
@@ -50,19 +52,28 @@ def stock_hot_search_baidu(
     }
     r = requests.get(url, params=params)
     data_json = r.json()
-    temp_df = pd.DataFrame(data_json["Result"]['list']["body"])
-    temp_df.rename(columns={
-        'name': "名称/代码",
-        'pxChangeRate': "涨跌幅",
-        'heat': "综合热度",
-
-    }, inplace=True)
-    temp_df = temp_df[[
-        "名称/代码",
-        "涨跌幅",
-        "综合热度",
-    ]]
-    temp_df['综合热度'] = pd.to_numeric(temp_df['综合热度'], errors='coerce')
+    result_json = data_json.get("Result", {})
+    if not isinstance(result_json, dict):
+        return pd.DataFrame(columns=columns)
+    list_json = result_json.get("list", {})
+    if not isinstance(list_json, dict):
+        return pd.DataFrame(columns=columns)
+    body_json = list_json.get("body", [])
+    if not body_json:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame(body_json)
+    temp_df.rename(
+        columns={
+            "name": "名称/代码",
+            "pxChangeRate": "涨跌幅",
+            "heat": "综合热度",
+        },
+        inplace=True,
+    )
+    temp_df = temp_df[
+        columns
+    ]
+    temp_df["综合热度"] = pd.to_numeric(temp_df["综合热度"], errors="coerce")
     return temp_df
 
 

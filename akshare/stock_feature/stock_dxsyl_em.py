@@ -15,7 +15,7 @@ import requests
 from akshare.utils.tqdm import get_tqdm
 
 
-def stock_dxsyl_em() -> pd.DataFrame:
+def stock_dxsyl_em(max_pages: int = None) -> pd.DataFrame:
     """
     东方财富网-数据中心-新股申购-打新收益率
     https://data.eastmoney.com/xg/xg/dxsyl.html
@@ -36,17 +36,46 @@ def stock_dxsyl_em() -> pd.DataFrame:
         "client": "WEB",
         "filter": """((APPLY_DATE>'2010-01-01')(|@APPLY_DATE="NULL"))((LISTING_DATE>'2010-01-01')(|@LISTING_DATE="NULL"))(TRADE_MARKET_CODE!="069001017")""",
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["result"]["pages"]
+    result = data_json.get("result") or {}
+    total_page = int(result.get("pages") or 0)
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pageNumber": page})
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        records = (data_json.get("result") or {}).get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat([big_df, temp_df], ignore_index=True)
+    output_columns = [
+        "序号",
+        "股票代码",
+        "股票简称",
+        "发行价",
+        "最新价",
+        "网上-发行中签率",
+        "网上-有效申购股数",
+        "网上-有效申购户数",
+        "网上-超额认购倍数",
+        "网下-配售中签率",
+        "网下-有效申购股数",
+        "网下-有效申购户数",
+        "网下-配售认购倍数",
+        "总发行数量",
+        "开盘溢价",
+        "首日涨幅",
+        "上市日期",
+    ]
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.reset_index(inplace=True)
     big_df["index"] = big_df.index + 1
     big_df.rename(
@@ -71,27 +100,7 @@ def stock_dxsyl_em() -> pd.DataFrame:
         },
         inplace=True,
     )
-    big_df = big_df[
-        [
-            "序号",
-            "股票代码",
-            "股票简称",
-            "发行价",
-            "最新价",
-            "网上-发行中签率",
-            "网上-有效申购股数",
-            "网上-有效申购户数",
-            "网上-超额认购倍数",
-            "网下-配售中签率",
-            "网下-有效申购股数",
-            "网下-有效申购户数",
-            "网下-配售认购倍数",
-            "总发行数量",
-            "开盘溢价",
-            "首日涨幅",
-            "上市日期",
-        ]
-    ]
+    big_df = big_df[output_columns]
     big_df["发行价"] = pd.to_numeric(big_df["发行价"], errors="coerce")
     big_df["最新价"] = pd.to_numeric(big_df["最新价"], errors="coerce")
     big_df["网上-发行中签率"] = pd.to_numeric(

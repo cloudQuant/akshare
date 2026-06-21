@@ -20,6 +20,42 @@ import requests
 from bs4 import BeautifulSoup
 
 
+_BASIC_COLUMNS = [
+    "城市",
+    "区域",
+    "监测点",
+    "时间",
+    "AQI",
+    "空气质量等级",
+    "首要污染物",
+    "经度",
+    "纬度",
+]
+
+_POLLUTANT_COLUMNS = [
+    "PM10_IAQI",
+    "PM10_浓度",
+    "PM2.5_IAQI",
+    "PM2.5_浓度",
+    "一氧化碳_IAQI",
+    "一氧化碳_浓度",
+    "二氧化氮_IAQI",
+    "二氧化氮_浓度",
+    "二氧化硫_IAQI",
+    "二氧化硫_浓度",
+    "臭氧1小时_IAQI",
+    "臭氧1小时_浓度",
+    "臭氧8小时_IAQI",
+    "臭氧8小时_浓度",
+]
+
+AIR_QUALITY_HEBEI_COLUMNS = _BASIC_COLUMNS + _POLLUTANT_COLUMNS
+
+
+def _empty_air_quality_hebei() -> pd.DataFrame:
+    return pd.DataFrame(columns=AIR_QUALITY_HEBEI_COLUMNS)
+
+
 def air_quality_hebei() -> pd.DataFrame:
     """
     河北省空气质量预报信息发布系统-空气质量预报, 未来 6 天
@@ -28,8 +64,16 @@ def air_quality_hebei() -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     url = "http://218.11.10.130:8080/api/hour/130000.xml"
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, features="xml")
+    try:
+        r = requests.get(url, timeout=15)
+    except requests.RequestException:
+        return _empty_air_quality_hebei()
+    if r.status_code != 200:
+        return _empty_air_quality_hebei()
+    try:
+        soup = BeautifulSoup(r.content, features="xml")
+    except Exception:
+        return _empty_air_quality_hebei()
     data = []
     cities = soup.find_all("City")
     for city in cities:
@@ -55,6 +99,8 @@ def air_quality_hebei() -> pd.DataFrame:
             data.append(row)
 
     df = pd.DataFrame(data)
+    if df.empty:
+        return _empty_air_quality_hebei()
     numeric_columns = ["AQI", "Longitude", "Latitude"] + [
         col for col in df.columns if col.endswith("_Value") or col.endswith("_IAQI")
     ]
@@ -86,19 +132,10 @@ def air_quality_hebei() -> pd.DataFrame:
         "PM10_IAQI": "PM10_IAQI",
     }
     df = df.rename(columns=column_names)
-    basic_columns = [
-        "城市",
-        "区域",
-        "监测点",
-        "时间",
-        "AQI",
-        "空气质量等级",
-        "首要污染物",
-        "经度",
-        "纬度",
-    ]
-    pollutant_columns = [col for col in df.columns if col not in basic_columns]
-    df = df[basic_columns + sorted(pollutant_columns)]
+    for col in AIR_QUALITY_HEBEI_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+    df = df[AIR_QUALITY_HEBEI_COLUMNS]
     return df
 
 

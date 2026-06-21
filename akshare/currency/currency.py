@@ -11,6 +11,40 @@ import pandas as pd
 import requests
 
 
+_CURRENCY_RATE_COLUMNS = ["currency", "date", "base", "rates"]
+_CURRENCY_TIME_SERIES_COLUMNS = ["date"]
+_CURRENCY_CONVERT_COLUMNS = ["item", "value"]
+
+
+def _empty_currency_rates() -> pd.DataFrame:
+    return pd.DataFrame(columns=_CURRENCY_RATE_COLUMNS)
+
+
+def _empty_currency_time_series() -> pd.DataFrame:
+    return pd.DataFrame(columns=_CURRENCY_TIME_SERIES_COLUMNS)
+
+
+def _empty_currency_convert() -> pd.DataFrame:
+    return pd.DataFrame(columns=_CURRENCY_CONVERT_COLUMNS)
+
+
+def _get_currencyscoop_response(url: str, params: dict) -> dict:
+    try:
+        r = requests.get(url, params=params, timeout=15)
+    except requests.RequestException:
+        return {}
+    if r.status_code != 200:
+        return {}
+    try:
+        data_json = r.json()
+    except ValueError:
+        return {}
+    response = data_json.get("response")
+    if not isinstance(response, dict) or "date" not in response:
+        return {}
+    return response
+
+
 def currency_latest(
     base: str = "USD", symbols: str = "", api_key: str = ""
 ) -> pd.DataFrame:
@@ -28,12 +62,17 @@ def currency_latest(
     """
     params = {"base": base, "symbols": symbols, "api_key": api_key}
     url = "https://api.currencyscoop.com/v1/latest"
-    r = requests.get(url, params=params)
-    temp_df = pd.DataFrame.from_dict(r.json()["response"])
-    temp_df["date"] = pd.to_datetime(temp_df["date"])
-    temp_df.reset_index(inplace=True)
-    temp_df.rename(columns={"index": "currency"}, inplace=True)
-    return temp_df
+    response = _get_currencyscoop_response(url, params)
+    if not response:
+        return _empty_currency_rates()
+    try:
+        temp_df = pd.DataFrame.from_dict(response)
+        temp_df["date"] = pd.to_datetime(temp_df["date"])
+        temp_df.reset_index(inplace=True)
+        temp_df.rename(columns={"index": "currency"}, inplace=True)
+    except (KeyError, ValueError):
+        return _empty_currency_rates()
+    return temp_df[_CURRENCY_RATE_COLUMNS]
 
 
 def currency_history(
@@ -55,12 +94,17 @@ def currency_history(
     """
     params = {"base": base, "date": date, "symbols": symbols, "api_key": api_key}
     url = "https://api.currencyscoop.com/v1/historical"
-    r = requests.get(url, params=params)
-    temp_df = pd.DataFrame.from_dict(r.json()["response"])
-    temp_df["date"] = pd.to_datetime(temp_df["date"]).dt.date
-    temp_df.reset_index(inplace=True)
-    temp_df.rename(columns={"index": "currency"}, inplace=True)
-    return temp_df
+    response = _get_currencyscoop_response(url, params)
+    if not response:
+        return _empty_currency_rates()
+    try:
+        temp_df = pd.DataFrame.from_dict(response)
+        temp_df["date"] = pd.to_datetime(temp_df["date"]).dt.date
+        temp_df.reset_index(inplace=True)
+        temp_df.rename(columns={"index": "currency"}, inplace=True)
+    except (KeyError, ValueError):
+        return _empty_currency_rates()
+    return temp_df[_CURRENCY_RATE_COLUMNS]
 
 
 def currency_time_series(
@@ -95,12 +139,24 @@ def currency_time_series(
         "symbols": symbols,
     }
     url = "https://api.currencyscoop.com/v1/timeseries"
-    r = requests.get(url, params=params)
-    temp_df = pd.DataFrame.from_dict(r.json()["response"])
-    temp_df = temp_df.T
-    temp_df.reset_index(inplace=True)
-    temp_df.rename(columns={"index": "date"}, inplace=True)
-    temp_df["date"] = pd.to_datetime(temp_df["date"]).dt.date
+    try:
+        r = requests.get(url, params=params, timeout=15)
+    except requests.RequestException:
+        return _empty_currency_time_series()
+    if r.status_code != 200:
+        return _empty_currency_time_series()
+    try:
+        data_json = r.json()
+        response = data_json.get("response")
+        if not isinstance(response, dict):
+            return _empty_currency_time_series()
+        temp_df = pd.DataFrame.from_dict(response)
+        temp_df = temp_df.T
+        temp_df.reset_index(inplace=True)
+        temp_df.rename(columns={"index": "date"}, inplace=True)
+        temp_df["date"] = pd.to_datetime(temp_df["date"]).dt.date
+    except (KeyError, ValueError):
+        return _empty_currency_time_series()
     return temp_df
 
 
@@ -150,12 +206,24 @@ def currency_convert(
         "api_key": api_key,
     }
     url = "https://api.currencyscoop.com/v1/convert"
-    r = requests.get(url, params=params)
-    temp_se = pd.Series(r.json()["response"])
+    try:
+        r = requests.get(url, params=params, timeout=15)
+    except requests.RequestException:
+        return _empty_currency_convert()
+    if r.status_code != 200:
+        return _empty_currency_convert()
+    try:
+        data_json = r.json()
+    except ValueError:
+        return _empty_currency_convert()
+    response = data_json.get("response")
+    if not isinstance(response, dict) or "timestamp" not in response:
+        return _empty_currency_convert()
+    temp_se = pd.Series(response)
     temp_se["timestamp"] = pd.to_datetime(temp_se["timestamp"], unit="s")
     temp_df = temp_se.to_frame()
     temp_df.reset_index(inplace=True)
-    temp_df.columns = ["item", "value"]
+    temp_df.columns = _CURRENCY_CONVERT_COLUMNS
     return temp_df
 
 

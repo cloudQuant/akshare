@@ -33,10 +33,16 @@ def futures_stock_shfe_js(date: str = "20240419") -> pd.DataFrame:
         "date": "-".join([date[:4], date[4:6], date[6:]]),
         "attr_id": "1",
     }
-    r = requests.get(url, params=params, headers=headers)
+    r = requests.get(url, params=params, headers=headers, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    columns_list = [item["name"] for item in data_json["data"]["keys"]]
-    temp_df = pd.DataFrame(data_json["data"]["values"], columns=columns_list)
+    data = data_json.get("data") or {}
+    keys = data.get("keys") or []
+    values = data.get("values") or []
+    if not keys or not values:
+        return pd.DataFrame()
+    columns_list = [item["name"] for item in keys]
+    temp_df = pd.DataFrame(values, columns=columns_list)
     for item in columns_list[1:]:
         temp_df[item] = pd.to_numeric(temp_df[item], errors="coerce")
     return temp_df

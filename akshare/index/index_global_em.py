@@ -101,6 +101,7 @@ def index_global_hist_em(symbol: str = "美元指数") -> pd.DataFrame:
     :return: 历史行情数据
     :rtype: pandas.DataFrame
     """
+    columns = ["日期", "代码", "名称", "今开", "最新价", "最高", "最低", "振幅"]
     url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
     params = {
         "secid": f"{index_global_em_symbol_map[symbol]['market']}.{index_global_em_symbol_map[symbol]['code']}",
@@ -114,12 +115,20 @@ def index_global_hist_em(symbol: str = "美元指数") -> pd.DataFrame:
         "ut": "f057cbcbce2a86e2866ab8877db1d059",
         "forcect": "1",
     }
-    r = requests.get(url=url, params=params)
-    data_json = r.json()
+    try:
+        r = requests.get(url=url, params=params, timeout=15)
+        data_json = r.json()
+    except (requests.RequestException, ValueError):
+        return pd.DataFrame(columns=columns)
 
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    temp_df["code"] = data_json["data"]["code"]
-    temp_df["name"] = data_json["data"]["name"]
+    data = data_json.get("data") if isinstance(data_json, dict) else None
+    if not data or not data.get("klines"):
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame([item.split(",") for item in data["klines"]])
+    if temp_df.empty:
+        return pd.DataFrame(columns=columns)
+    temp_df["code"] = data.get("code")
+    temp_df["name"] = data.get("name")
     temp_df.columns = [
         "日期",
         "今开",

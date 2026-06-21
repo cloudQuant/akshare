@@ -45,10 +45,15 @@ def migration_area_baidu(
         "type": indicator,
         "date": date,
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"Baidu migration endpoint returned HTTP {r.status_code}: {url}")
     data_text = r.text[r.text.find("({") + 1 : r.text.rfind(");")]
     data_json = json.loads(data_text)
-    temp_df = pd.DataFrame(data_json["data"]["list"])
+    data_list = data_json.get("data", {}).get("list") or []
+    temp_df = pd.DataFrame(data_list)
+    if temp_df.empty:
+        return pd.DataFrame(columns=["city_name", "province_name", "value"])
     temp_df["value"] = pd.to_numeric(temp_df["value"], errors="coerce")
     return temp_df
 

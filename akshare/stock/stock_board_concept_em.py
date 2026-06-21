@@ -13,6 +13,7 @@ import pandas as pd
 import requests
 
 from akshare.utils.func import fetch_paginated_data
+from akshare.utils.request import request_eastmoney
 
 
 @lru_cache()
@@ -209,8 +210,10 @@ def stock_board_concept_spot_em(symbol: str = "可燃冰") -> pd.DataFrame:
         fltt="1",
         secid=f"90.{em_code}",
     )
-    r = requests.get(url, params=params)
+    r = request_eastmoney(url, params=params, timeout=15)
     data_dict = r.json()
+    if not data_dict.get("data"):
+        return pd.DataFrame(columns=["item", "value"])
     result = pd.DataFrame.from_dict(data_dict["data"], orient="index")
     result.rename(field_map, inplace=True)
     result.reset_index(inplace=True)
@@ -252,10 +255,13 @@ def stock_board_concept_hist_em(
         "weekly": "102",
         "monthly": "103",
     }
-    stock_board_concept_em_map = __stock_board_concept_name_em()
-    stock_board_code = stock_board_concept_em_map[
-        stock_board_concept_em_map["板块名称"] == symbol
-    ]["板块代码"].values[0]
+    if re.match(pattern=r"^BK\d+", string=symbol):
+        stock_board_code = symbol
+    else:
+        stock_board_concept_em_map = __stock_board_concept_name_em()
+        stock_board_code = stock_board_concept_em_map[
+            stock_board_concept_em_map["板块名称"] == symbol
+            ]["板块代码"].values[0]
     adjust_map = {"": "0", "qfq": "1", "hfq": "2"}
     url = "https://91.push2his.eastmoney.com/api/qt/stock/kline/get"
     params = {
@@ -269,10 +275,10 @@ def stock_board_concept_hist_em(
         "smplmt": "10000",
         "lmt": "1000000",
     }
-    r = requests.get(url, params=params)
+    r = request_eastmoney(url, params=params, timeout=15)
     data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    temp_df.columns = [
+    klines = (data_json.get("data") or {}).get("klines") or []
+    columns = [
         "日期",
         "开盘",
         "收盘",
@@ -285,6 +291,10 @@ def stock_board_concept_hist_em(
         "涨跌额",
         "换手率",
     ]
+    if not klines:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
+    temp_df.columns = columns
     temp_df = temp_df[
         [
             "日期",
@@ -326,10 +336,13 @@ def stock_board_concept_hist_min_em(
     :return: 分时历史行情
     :rtype: pandas.DataFrame
     """
-    stock_board_concept_em_map = __stock_board_concept_name_em()
-    stock_board_code = stock_board_concept_em_map[
-        stock_board_concept_em_map["板块名称"] == symbol
-    ]["板块代码"].values[0]
+    if re.match(pattern=r"^BK\d+", string=symbol):
+        stock_board_code = symbol
+    else:
+        stock_board_concept_em_map = __stock_board_concept_name_em()
+        stock_board_code = stock_board_concept_em_map[
+            stock_board_concept_em_map["板块名称"] == symbol
+            ]["板块代码"].values[0]
     if period == "1":
         url = "https://push2his.eastmoney.com/api/qt/stock/trends2/get"
         params = {
@@ -339,12 +352,10 @@ def stock_board_concept_hist_min_em(
             "ndays": "1",
             "secid": f"90.{stock_board_code}",
         }
-        r = requests.get(url, params=params)
+        r = request_eastmoney(url, params=params, timeout=15)
         data_json = r.json()
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["trends"]]
-        )
-        temp_df.columns = [
+        trends = (data_json.get("data") or {}).get("trends") or []
+        columns = [
             "日期时间",
             "开盘",
             "收盘",
@@ -354,6 +365,10 @@ def stock_board_concept_hist_min_em(
             "成交额",
             "最新价",
         ]
+        if not trends:
+            return pd.DataFrame(columns=columns)
+        temp_df = pd.DataFrame([item.split(",") for item in trends])
+        temp_df.columns = columns
         temp_df["开盘"] = pd.to_numeric(temp_df["开盘"], errors="coerce")
         temp_df["收盘"] = pd.to_numeric(temp_df["收盘"], errors="coerce")
         temp_df["最高"] = pd.to_numeric(temp_df["最高"], errors="coerce")
@@ -373,12 +388,10 @@ def stock_board_concept_hist_min_em(
             "end": "20500101",
             "lmt": "1000000",
         }
-        r = requests.get(url, params=params)
+        r = request_eastmoney(url, params=params, timeout=15)
         data_json = r.json()
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
-        )
-        temp_df.columns = [
+        klines = (data_json.get("data") or {}).get("klines") or []
+        columns = [
             "日期时间",
             "开盘",
             "收盘",
@@ -391,6 +404,10 @@ def stock_board_concept_hist_min_em(
             "涨跌额",
             "换手率",
         ]
+        if not klines:
+            return pd.DataFrame(columns=columns)
+        temp_df = pd.DataFrame([item.split(",") for item in klines])
+        temp_df.columns = columns
         temp_df = temp_df[
             [
                 "日期时间",

@@ -19,6 +19,12 @@ from akshare.futures.symbol_var import symbol_market, symbol_varieties
 
 calendar = cons.get_calendar()
 
+_ROLL_YIELD_COLUMNS = ["roll_yield", "near_by", "deferred", "date"]
+
+
+def _empty_roll_yield_bar() -> pd.DataFrame:
+    return pd.DataFrame(columns=_ROLL_YIELD_COLUMNS)
+
 
 def get_roll_yield(date=None, var="BB", symbol1=None, symbol2=None, df=None):
     """
@@ -101,21 +107,30 @@ def get_roll_yield_bar(
     )
 
     if type_method == "symbol":
-        df = get_futures_daily(
-            start_date=date, end_date=date, market=symbol_market(var)
-        )
+        try:
+            df = get_futures_daily(
+                start_date=date, end_date=date, market=symbol_market(var)
+            )
+        except Exception:
+            return pd.DataFrame()
+        if df.empty or "variety" not in df.columns:
+            return pd.DataFrame()
         df = df[df["variety"] == var]
         return df
 
     if type_method == "var":
         df = pd.DataFrame()
         for market in ["dce", "cffex", "shfe", "czce", "gfex"]:
-            df = pd.concat(
-                [
-                    df,
-                    get_futures_daily(start_date=date, end_date=date, market=market),
-                ]
-            )
+            try:
+                market_df = get_futures_daily(
+                    start_date=date, end_date=date, market=market
+                )
+            except Exception:
+                continue
+            if not market_df.empty:
+                df = pd.concat([df, market_df])
+        if df.empty or "variety" not in df.columns:
+            return _empty_roll_yield_bar()
         var_list = list(set(df["variety"]))
         for i_remove in ["IO", "MO", "HO"]:
             if i_remove in var_list:
@@ -135,6 +150,8 @@ def get_roll_yield_bar(
                     ]
                 )
         df_l["date"] = date
+        if df_l.empty:
+            return _empty_roll_yield_bar()
         df_l = df_l.sort_values("roll_yield")
         return df_l
 

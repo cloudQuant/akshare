@@ -20,6 +20,10 @@ from py_mini_racer import MiniRacer
 from akshare.utils import demjson
 
 
+def _empty_air_quality_hist() -> pd.DataFrame:
+    return pd.DataFrame()
+
+
 def _get_js_path(name: str = None, module_file: str = None) -> str:
     """
     获取 JS 文件的路径(从模块所在目录查找)
@@ -206,12 +210,27 @@ def air_quality_hist(
         "X-Requested-With": "XMLHttpRequest",
     }
     params = {"param": ctx.call("encode_param", need)}
-    r = requests.post(url, data=params, headers=headers)
-    temp_text = ctx.call("decryptData", r.text)
-    data_json = demjson.decode(ctx.call("b.decode", temp_text))
-    temp_df = pd.DataFrame(data_json["result"]["data"]["rows"])
-    temp_df.index = temp_df["time"]
-    del temp_df["time"]
+    try:
+        r = requests.post(url, data=params, headers=headers, timeout=15)
+    except requests.RequestException:
+        return _empty_air_quality_hist()
+    if r.status_code != 200 or not r.text:
+        return _empty_air_quality_hist()
+    try:
+        temp_text = ctx.call("decryptData", r.text)
+    except Exception:
+        return _empty_air_quality_hist()
+    if not temp_text:
+        return _empty_air_quality_hist()
+    try:
+        data_json = demjson.decode(ctx.call("b.decode", temp_text))
+        temp_df = pd.DataFrame(data_json["result"]["data"]["rows"])
+        temp_df.index = temp_df["time"]
+        del temp_df["time"]
+    except (KeyError, TypeError, ValueError):
+        return _empty_air_quality_hist()
+    if temp_df.empty:
+        return _empty_air_quality_hist()
     temp_df = temp_df.astype(float, errors="ignore")
     return temp_df
 

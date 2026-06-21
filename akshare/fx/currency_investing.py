@@ -13,6 +13,13 @@ from bs4 import BeautifulSoup
 from akshare.utils.tqdm import get_tqdm
 
 
+_CURRENCY_PAIR_MAP_COLUMNS = ["name", "code"]
+
+
+def _empty_currency_pair_map() -> pd.DataFrame:
+    return pd.DataFrame(columns=_CURRENCY_PAIR_MAP_COLUMNS)
+
+
 def currency_pair_map(symbol: str = "美元") -> pd.DataFrame:
     """
     指定货币的所有可获取货币对的数据
@@ -48,7 +55,12 @@ def currency_pair_map(symbol: str = "美元") -> pd.DataFrame:
         url = "https://cn.investing.com/currencies/Service/region"
         params = {"region_ID": region_id, "currency_ID": "false"}
 
-        r = requests.get(url, params=params, headers=headers)
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=15)
+        except requests.RequestException:
+            return _empty_currency_pair_map()
+        if r.status_code != 200:
+            return _empty_currency_pair_map()
         soup = BeautifulSoup(r.text, features="lxml")
         region_code.extend(
             [
@@ -61,12 +73,19 @@ def currency_pair_map(symbol: str = "美元") -> pd.DataFrame:
         )
 
     name_id_map = dict(zip(region_name, region_code))
+    if symbol not in name_id_map:
+        return _empty_currency_pair_map()
     url = "https://cn.investing.com/currencies/Service/currency"
     params = {
         "region_ID": name_id_map[symbol].split("-")[1],
         "currency_ID": name_id_map[symbol].split("-")[0],
     }
-    r = requests.get(url, params=params, headers=headers)
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+    except requests.RequestException:
+        return _empty_currency_pair_map()
+    if r.status_code != 200:
+        return _empty_currency_pair_map()
     soup = BeautifulSoup(r.text, features="lxml")
 
     temp_code = [item["href"].split("/")[-1] for item in soup.find_all("a")]  # need

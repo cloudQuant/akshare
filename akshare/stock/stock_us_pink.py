@@ -9,6 +9,7 @@ https://quote.eastmoney.com/center/gridlist.html#us_pinksheet
 import pandas as pd
 import requests
 
+from akshare.utils.request import request_eastmoney
 from akshare.utils.tqdm import get_tqdm
 
 
@@ -26,7 +27,7 @@ def stock_us_pink_spot_em() -> pd.DataFrame:
         "invt": "1",
         "fs": "m:153",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,"
-                  "f26,f22,f33,f11,f62,f128,f136,f115,f152",
+        "f26,f22,f33,f11,f62,f128,f136,f115,f152",
         "fid": "f3",
         "pn": "1",
         "pz": "100",
@@ -34,17 +35,47 @@ def stock_us_pink_spot_em() -> pd.DataFrame:
         "dect": "1",
         "ut": "bd1d9ddb04089700cf9c27f6f7426281",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
+    try:
+        r = request_eastmoney(url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Eastmoney US pink endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"Eastmoney US pink endpoint returned HTTP {r.status_code}: {url}"
+        )
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Eastmoney US pink endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
     import math
-    total_page = math.ceil(data_json['data']["total"] / 100)
+
+    data = data_json.get("data") or {}
+    if not data.get("diff"):
+        return pd.DataFrame()
+    total_page = math.ceil(data["total"] / 100)
     tqdm = get_tqdm()
     big_df = pd.DataFrame()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pn": page})
-        r = requests.get(url, params=params)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["data"]["diff"])
+        try:
+            r = request_eastmoney(url, params=params, timeout=15)
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Eastmoney US pink endpoint request failed: {url}") from exc
+        if r.status_code != 200:
+            raise RuntimeError(
+                f"Eastmoney US pink endpoint returned HTTP {r.status_code}: {url}"
+            )
+        try:
+            data_json = r.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Eastmoney US pink endpoint returned non-JSON response: {url}; "
+                f"preview={r.text[:120]!r}"
+            ) from exc
+        temp_df = pd.DataFrame((data_json.get("data") or {}).get("diff") or [])
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df.columns = [
         "_",

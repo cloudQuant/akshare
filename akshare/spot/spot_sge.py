@@ -10,8 +10,59 @@ https://www.sge.com.cn/sjzx/mrhq
 
 import pandas as pd
 import requests
+import time
 
 from akshare.utils.cons import headers
+
+
+_SPOT_QUOTATIONS_SGE_COLUMNS = ["品种", "时间", "现价", "更新时间"]
+_SPOT_HIST_SGE_COLUMNS = ["date", "open", "close", "low", "high"]
+_SPOT_BENCHMARK_SGE_COLUMNS = ["交易时间", "晚盘价", "早盘价"]
+
+
+def _empty_spot_quotations_sge() -> pd.DataFrame:
+    return pd.DataFrame(columns=_SPOT_QUOTATIONS_SGE_COLUMNS)
+
+
+def _empty_spot_hist_sge() -> pd.DataFrame:
+    return pd.DataFrame(columns=_SPOT_HIST_SGE_COLUMNS)
+
+
+def _empty_spot_benchmark_sge() -> pd.DataFrame:
+    return pd.DataFrame(columns=_SPOT_BENCHMARK_SGE_COLUMNS)
+
+
+def _sge_request_json(
+    method: str,
+    url: str,
+    *,
+    payload: dict | None = None,
+    request_headers: dict | None = None,
+    timeout: int = 15,
+    max_retries: int = 2,
+    retry_delay: float = 1.0,
+) -> dict | None:
+    for attempt in range(max_retries + 1):
+        try:
+            kwargs = {
+                "headers": request_headers or headers,
+                "timeout": timeout,
+            }
+            if method.upper() == "GET":
+                kwargs["params"] = payload or {}
+            else:
+                kwargs["data"] = payload or {}
+            response = requests.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response.json()
+        except (
+            requests.exceptions.RequestException,
+            ValueError,
+        ):
+            if attempt < max_retries:
+                time.sleep(retry_delay)
+                continue
+    return None
 
 
 def spot_symbol_table_sge() -> pd.DataFrame:
@@ -83,27 +134,33 @@ def spot_quotations_sge(symbol: str = "Au99.99") -> pd.DataFrame:
         "Chrome/107.0.0.0 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
     }
-    r = requests.get(url, data=payload, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(
-        {
-            "品种": data_json["heyue"],
-            "时间": data_json["times"],
-            "现价": data_json["data"],
-            "更新时间": data_json["delaystr"],
-        }
-    )
-    temp_df["现价"] = pd.to_numeric(temp_df["现价"], errors="coerce")
-    # 将更新时间中的时间部分提取出来
-    update_time = temp_df["更新时间"].iloc[0].split()[1]
-    # 将时间列转换为时间格式以便排序
-    temp_df["时间"] = pd.to_datetime(temp_df["时间"], format="%H:%M").dt.time
-    # 过滤掉大于等于更新时间的数据
-    temp_df = temp_df[temp_df["时间"].astype(str) < update_time]
-    # 按时间排序
-    temp_df = temp_df.sort_values(by=["时间"])
-    temp_df.reset_index(inplace=True, drop=True)
-    return temp_df
+    data_json = _sge_request_json("GET", url, payload=payload, request_headers=headers)
+    if not data_json:
+        return _empty_spot_quotations_sge()
+    try:
+        temp_df = pd.DataFrame(
+            {
+                "品种": data_json["heyue"],
+                "时间": data_json["times"],
+                "现价": data_json["data"],
+                "更新时间": data_json["delaystr"],
+            }
+        )
+        if temp_df.empty:
+            return _empty_spot_quotations_sge()
+        temp_df["现价"] = pd.to_numeric(temp_df["现价"], errors="coerce")
+        # 将更新时间中的时间部分提取出来
+        update_time = temp_df["更新时间"].iloc[0].split()[1]
+        # 将时间列转换为时间格式以便排序
+        temp_df["时间"] = pd.to_datetime(temp_df["时间"], format="%H:%M").dt.time
+        # 过滤掉大于等于更新时间的数据
+        temp_df = temp_df[temp_df["时间"].astype(str) < update_time]
+        # 按时间排序
+        temp_df = temp_df.sort_values(by=["时间"])
+        temp_df.reset_index(inplace=True, drop=True)
+        return temp_df
+    except (KeyError, IndexError, TypeError, ValueError):
+        return _empty_spot_quotations_sge()
 
 
 def spot_hist_sge(symbol: str = "Au99.99") -> pd.DataFrame:
@@ -141,23 +198,23 @@ def spot_hist_sge(symbol: str = "Au99.99") -> pd.DataFrame:
         "Chrome/107.0.0.0 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
     }
-    r = requests.post(url, data=payload, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["time"])
-    temp_df.columns = [
-        "date",
-        "open",
-        "close",
-        "low",
-        "high",
-    ]
+    data_json = _sge_request_json("POST", url, payload=payload, request_headers=headers)
+    if not data_json:
+        return _empty_spot_hist_sge()
+    try:
+        temp_df = pd.DataFrame(data_json["time"])
+        if temp_df.empty:
+            return _empty_spot_hist_sge()
+        temp_df.columns = _SPOT_HIST_SGE_COLUMNS
 
-    temp_df["date"] = pd.to_datetime(temp_df["date"], errors="coerce").dt.date
-    temp_df["open"] = pd.to_numeric(temp_df["open"], errors="coerce")
-    temp_df["close"] = pd.to_numeric(temp_df["close"], errors="coerce")
-    temp_df["high"] = pd.to_numeric(temp_df["high"], errors="coerce")
-    temp_df["low"] = pd.to_numeric(temp_df["low"], errors="coerce")
-    return temp_df
+        temp_df["date"] = pd.to_datetime(temp_df["date"], errors="coerce").dt.date
+        temp_df["open"] = pd.to_numeric(temp_df["open"], errors="coerce")
+        temp_df["close"] = pd.to_numeric(temp_df["close"], errors="coerce")
+        temp_df["high"] = pd.to_numeric(temp_df["high"], errors="coerce")
+        temp_df["low"] = pd.to_numeric(temp_df["low"], errors="coerce")
+        return temp_df
+    except (KeyError, TypeError, ValueError):
+        return _empty_spot_hist_sge()
 
 
 def spot_golden_benchmark_sge() -> pd.DataFrame:
@@ -169,26 +226,32 @@ def spot_golden_benchmark_sge() -> pd.DataFrame:
     """
     url = "https://www.sge.com.cn/graph/DayilyJzj"
     payload = {}
-    r = requests.post(url, data=payload, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["wp"])
-    temp_df.columns = [
-        "交易时间",
-        "晚盘价",
-    ]
-    temp_df["交易时间"] = pd.to_datetime(temp_df["交易时间"], unit="ms").dt.date
-    temp_zp_df = pd.DataFrame(data_json["zp"])
-    temp_zp_df.columns = [
-        "交易时间",
-        "早盘价",
-    ]
-    temp_zp_df["交易时间"] = pd.to_datetime(
-        temp_zp_df["交易时间"], unit="ms", errors="coerce"
-    ).dt.date
-    temp_df["早盘价"] = temp_zp_df["早盘价"]
-    temp_df["晚盘价"] = pd.to_numeric(temp_df["晚盘价"], errors="coerce")
-    temp_df["早盘价"] = pd.to_numeric(temp_df["早盘价"], errors="coerce")
-    return temp_df
+    data_json = _sge_request_json("POST", url, payload=payload, request_headers=headers)
+    if not data_json:
+        return _empty_spot_benchmark_sge()
+    try:
+        temp_df = pd.DataFrame(data_json["wp"])
+        if temp_df.empty:
+            return _empty_spot_benchmark_sge()
+        temp_df.columns = [
+            "交易时间",
+            "晚盘价",
+        ]
+        temp_df["交易时间"] = pd.to_datetime(temp_df["交易时间"], unit="ms").dt.date
+        temp_zp_df = pd.DataFrame(data_json["zp"])
+        temp_zp_df.columns = [
+            "交易时间",
+            "早盘价",
+        ]
+        temp_zp_df["交易时间"] = pd.to_datetime(
+            temp_zp_df["交易时间"], unit="ms", errors="coerce"
+        ).dt.date
+        temp_df["早盘价"] = temp_zp_df["早盘价"]
+        temp_df["晚盘价"] = pd.to_numeric(temp_df["晚盘价"], errors="coerce")
+        temp_df["早盘价"] = pd.to_numeric(temp_df["早盘价"], errors="coerce")
+        return temp_df
+    except (KeyError, TypeError, ValueError):
+        return _empty_spot_benchmark_sge()
 
 
 def spot_silver_benchmark_sge() -> pd.DataFrame:
@@ -200,26 +263,32 @@ def spot_silver_benchmark_sge() -> pd.DataFrame:
     """
     url = "https://www.sge.com.cn/graph/DayilyShsilverJzj"
     payload = {}
-    r = requests.post(url, data=payload, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["wp"])
-    temp_df.columns = [
-        "交易时间",
-        "晚盘价",
-    ]
-    temp_df["交易时间"] = pd.to_datetime(temp_df["交易时间"], unit="ms").dt.date
-    temp_zp_df = pd.DataFrame(data_json["zp"])
-    temp_zp_df.columns = [
-        "交易时间",
-        "早盘价",
-    ]
-    temp_zp_df["交易时间"] = pd.to_datetime(
-        temp_zp_df["交易时间"], unit="ms", errors="coerce"
-    ).dt.date
-    temp_df["早盘价"] = temp_zp_df["早盘价"]
-    temp_df["晚盘价"] = pd.to_numeric(temp_df["晚盘价"], errors="coerce")
-    temp_df["早盘价"] = pd.to_numeric(temp_df["早盘价"], errors="coerce")
-    return temp_df
+    data_json = _sge_request_json("POST", url, payload=payload, request_headers=headers)
+    if not data_json:
+        return _empty_spot_benchmark_sge()
+    try:
+        temp_df = pd.DataFrame(data_json["wp"])
+        if temp_df.empty:
+            return _empty_spot_benchmark_sge()
+        temp_df.columns = [
+            "交易时间",
+            "晚盘价",
+        ]
+        temp_df["交易时间"] = pd.to_datetime(temp_df["交易时间"], unit="ms").dt.date
+        temp_zp_df = pd.DataFrame(data_json["zp"])
+        temp_zp_df.columns = [
+            "交易时间",
+            "早盘价",
+        ]
+        temp_zp_df["交易时间"] = pd.to_datetime(
+            temp_zp_df["交易时间"], unit="ms", errors="coerce"
+        ).dt.date
+        temp_df["早盘价"] = temp_zp_df["早盘价"]
+        temp_df["晚盘价"] = pd.to_numeric(temp_df["晚盘价"], errors="coerce")
+        temp_df["早盘价"] = pd.to_numeric(temp_df["早盘价"], errors="coerce")
+        return temp_df
+    except (KeyError, TypeError, ValueError):
+        return _empty_spot_benchmark_sge()
 
 
 if __name__ == "__main__":

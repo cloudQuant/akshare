@@ -14,6 +14,7 @@ import jsonpath as jp
 import numpy as np
 import pandas as pd
 import requests
+from requests.exceptions import JSONDecodeError
 import urllib3
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -31,8 +32,13 @@ def _get_nbs_tree(idcode: str, dbcode: str) -> List[Dict]:
     """
     url = "https://data.stats.gov.cn/easyquery.htm"
     params = {"id": idcode, "dbcode": dbcode, "wdcode": "zb", "m": "getTree"}
-    r = requests.post(url, params=params, verify=False, allow_redirects=True)
-    data_json = r.json()
+    r = requests.post(url, params=params, verify=False, allow_redirects=True, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"NBS tree endpoint returned HTTP {r.status_code}: {url}")
+    try:
+        data_json = r.json()
+    except JSONDecodeError as exc:
+        raise RuntimeError("NBS tree endpoint returned non-JSON data") from exc
     return data_json
 
 
@@ -54,8 +60,13 @@ def _get_nbs_wds_tree(idcode: str, dbcode: str, rowcode: str) -> List[Dict]:
         "wds": '[{"wdcode":"zb","valuecode":"%s"}]' % idcode,
         "k1": str(time.time_ns())[:13],
     }
-    r = requests.post(url, params=params, verify=False, allow_redirects=True)
-    data_json = r.json()
+    r = requests.post(url, params=params, verify=False, allow_redirects=True, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"NBS other dimensions endpoint returned HTTP {r.status_code}: {url}")
+    try:
+        data_json = r.json()
+    except JSONDecodeError as exc:
+        raise RuntimeError("NBS other dimensions endpoint returned non-JSON data") from exc
     data_json = data_json["returndata"][0]["nodes"]
     return data_json
 
@@ -113,8 +124,13 @@ def macro_china_nbs_nation(
         '{"wdcode":"sj","valuecode":"%s"}]' % (indicator_id, period),
         "k1": str(time.time_ns())[:13],
     }
-    r = requests.get(url, params=params, verify=False, allow_redirects=True)
-    data_json = r.json()
+    r = requests.get(url, params=params, verify=False, allow_redirects=True, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"NBS query endpoint returned HTTP {r.status_code}: {url}")
+    try:
+        data_json = r.json()
+    except JSONDecodeError as exc:
+        raise RuntimeError("NBS query endpoint returned non-JSON data") from exc
 
     # 整理为dataframe
     temp_df = pd.DataFrame(data_json["returndata"]["datanodes"])
@@ -232,8 +248,13 @@ def macro_china_nbs_region(
         "dfwds": dfwds,
         "k1": str(time.time_ns())[:13],
     }
-    r = requests.get(url, params=params, verify=False, allow_redirects=True)
-    data_json = r.json()
+    r = requests.get(url, params=params, verify=False, allow_redirects=True, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"NBS region query endpoint returned HTTP {r.status_code}: {url}")
+    try:
+        data_json = r.json()
+    except JSONDecodeError as exc:
+        raise RuntimeError("NBS region query endpoint returned non-JSON data") from exc
 
     # 整理为dataframe
     temp_df = pd.DataFrame(data_json["returndata"]["datanodes"])

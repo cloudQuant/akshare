@@ -21,6 +21,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.ssl_ import create_urllib3_context
 from tqdm import tqdm
 
+from akshare.utils.request import request_szse
+
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -138,7 +140,10 @@ def stock_share_hold_change_sse(symbol: str = "600000") -> pd.DataFrame:
     return big_df
 
 
-def stock_share_hold_change_szse(symbol: str = "全部") -> pd.DataFrame:
+def stock_share_hold_change_szse(
+    symbol: str = "全部",
+    max_pages: int = None,
+) -> pd.DataFrame:
     """
     深圳证券交易所-信息披露-监管信息公开-董监高人员股份变动
     https://www.szse.cn/disclosure/supervision/change/index.html
@@ -160,9 +165,12 @@ def stock_share_hold_change_szse(symbol: str = "全部") -> pd.DataFrame:
         "random": "0.7874198771222201",
     }
     params if symbol == "全部" else params.update({"txtDMorJC": symbol})
-    r = requests.get(url, headers=headers, params=params)
+    r = request_szse(url, headers=headers, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
     total_page = data_json[0]["metadata"]["pagecount"]
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update(
@@ -170,10 +178,30 @@ def stock_share_hold_change_szse(symbol: str = "全部") -> pd.DataFrame:
                 "PAGENO": page,
             }
         )
-        r = requests.get(url, headers=headers, params=params)
+        r = request_szse(url, headers=headers, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json[0]["data"])
+        records = data_json[0].get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat(objs=[big_df, temp_df], axis=0, ignore_index=True)
+    output_columns = [
+        "证券代码",
+        "证券简称",
+        "董监高姓名",
+        "变动日期",
+        "变动股份数量",
+        "成交均价",
+        "变动原因",
+        "变动比例",
+        "当日结存股数",
+        "股份变动人姓名",
+        "职务",
+        "变动人与董监高的关系",
+    ]
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.rename(
         columns={
             "zqdm": "证券代码",
@@ -191,22 +219,7 @@ def stock_share_hold_change_szse(symbol: str = "全部") -> pd.DataFrame:
         },
         inplace=True,
     )
-    big_df = big_df[
-        [
-            "证券代码",
-            "证券简称",
-            "董监高姓名",
-            "变动日期",
-            "变动股份数量",
-            "成交均价",
-            "变动原因",
-            "变动比例",
-            "当日结存股数",
-            "股份变动人姓名",
-            "职务",
-            "变动人与董监高的关系",
-        ]
-    ]
+    big_df = big_df[output_columns]
     big_df["变动日期"] = pd.to_datetime(big_df["变动日期"], errors="coerce").dt.date
     big_df["变动股份数量"] = pd.to_numeric(big_df["变动股份数量"], errors="coerce")
     big_df["成交均价"] = pd.to_numeric(big_df["成交均价"], errors="coerce")

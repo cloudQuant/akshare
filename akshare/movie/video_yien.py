@@ -17,6 +17,23 @@ import requests
 import py_mini_racer
 
 
+_VIDEO_YIEN_COLUMNS = [
+    "排序",
+    "名称",
+    "类型",
+    "播映指数",
+    "媒体热度",
+    "用户热度",
+    "好评度",
+    "观看度",
+    "统计日期",
+]
+
+
+def _empty_video_yien() -> pd.DataFrame:
+    return pd.DataFrame(columns=_VIDEO_YIEN_COLUMNS)
+
+
 def _get_js_path(name: str = "", module_file: str = "") -> str:
     """
     get JS file path
@@ -62,6 +79,25 @@ def decrypt(origin_data: str = "") -> str:
     return data
 
 
+def _post_endata_video_json(url: str, payload: dict) -> dict:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.endata.com.cn/Video/index.html",
+        "Origin": "https://www.endata.com.cn",
+    }
+    r = requests.post(url, data=payload, headers=headers, timeout=15)
+    r.encoding = "utf8"
+    if r.status_code != 200:
+        return {}
+    try:
+        return json.loads(decrypt(r.text))
+    except json.JSONDecodeError:
+        return {}
+
+
 def video_tv() -> pd.DataFrame:
     """
     艺恩-视频放映-电视剧集
@@ -71,11 +107,12 @@ def video_tv() -> pd.DataFrame:
     """
     url = "https://www.endata.com.cn/API/GetData.ashx"
     payload = {"tvType": 2, "MethodName": "BoxOffice_GetTvData_PlayIndexRank"}
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
-    report_date = data_json["Data"]["Table1"][0]["MaxDate"]
+    data_json = _post_endata_video_json(url, payload)
+    data = data_json.get("Data") or {}
+    if not data.get("Table"):
+        return _empty_video_yien()
+    temp_df = pd.DataFrame(data["Table"])
+    report_date = (data.get("Table1") or [{}])[0].get("MaxDate")
     temp_df.columns = [
         "排序",
         "名称",
@@ -102,11 +139,12 @@ def video_variety_show() -> pd.DataFrame:
     """
     url = "https://www.endata.com.cn/API/GetData.ashx"
     payload = {"tvType": 8, "MethodName": "BoxOffice_GetTvData_PlayIndexRank"}
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
-    report_date = data_json["Data"]["Table1"][0]["MaxDate"]
+    data_json = _post_endata_video_json(url, payload)
+    data = data_json.get("Data") or {}
+    if not data.get("Table"):
+        return _empty_video_yien()
+    temp_df = pd.DataFrame(data["Table"])
+    report_date = (data.get("Table1") or [{}])[0].get("MaxDate")
     temp_df.columns = [
         "排序",
         "名称",

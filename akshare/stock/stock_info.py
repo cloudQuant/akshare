@@ -13,6 +13,8 @@ from io import StringIO
 
 import pandas as pd
 import requests
+
+from akshare.utils.request import request_szse
 from akshare.utils.tqdm import get_tqdm
 
 
@@ -39,7 +41,14 @@ def stock_info_sz_name_code(symbol: str = "A股列表") -> pd.DataFrame:
         "TABKEY": indicator_map[symbol],
         "random": "0.6935816432433362",
     }
-    r = requests.get(url, params=params, timeout=150)
+    try:
+        r = request_szse(url, params=params, timeout=150)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"SZSE stock list endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"SZSE stock list endpoint returned HTTP {r.status_code}: {url}"
+        )
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         temp_df = pd.read_excel(BytesIO(r.content))
@@ -159,7 +168,9 @@ def stock_info_sh_name_code(symbol: str = "主板A股") -> pd.DataFrame:
     temp_df.rename(
         columns={
             col_stock_code: "证券代码",
-            "COMPANY_ABBR": "证券简称",
+            "SEC_NAME_CN": "证券简称",
+            "SEC_NAME_FULL": "证券全称",
+            "COMPANY_ABBR": "公司简称",
             "FULL_NAME": "公司全称",
             "LIST_DATE": "上市日期",
         },
@@ -169,6 +180,8 @@ def stock_info_sh_name_code(symbol: str = "主板A股") -> pd.DataFrame:
         [
             "证券代码",
             "证券简称",
+            "证券全称",
+            "公司简称",
             "公司全称",
             "上市日期",
         ]
@@ -365,7 +378,7 @@ def stock_info_sz_delist(symbol: str = "终止上市公司") -> pd.DataFrame:
         "TABKEY": indicator_map[symbol],
         "random": "0.6935816432433362",
     }
-    r = requests.get(url, params=params)
+    r = request_szse(url, params=params, timeout=150)
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         temp_df = pd.read_excel(BytesIO(r.content))
@@ -394,7 +407,7 @@ def stock_info_sz_change_name(symbol: str = "全称变更") -> pd.DataFrame:
         "TABKEY": indicator_map[symbol],
         "random": "0.6935816432433362",
     }
-    r = requests.get(url, params=params)
+    r = request_szse(url, params=params, timeout=150)
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         temp_df = pd.read_excel(BytesIO(r.content))

@@ -13,6 +13,30 @@ from akshare.forex.cons import symbol_market_map
 from akshare.utils.func import fetch_paginated_data
 
 
+_FOREX_SPOT_COLUMNS = [
+    "序号",
+    "代码",
+    "名称",
+    "最新价",
+    "涨跌额",
+    "涨跌幅",
+    "今开",
+    "最高",
+    "最低",
+    "昨收",
+]
+
+_FOREX_HIST_COLUMNS = ["日期", "代码", "名称", "今开", "最新价", "最高", "最低", "振幅"]
+
+
+def _empty_forex_spot_em() -> pd.DataFrame:
+    return pd.DataFrame(columns=_FOREX_SPOT_COLUMNS)
+
+
+def _empty_forex_hist_em() -> pd.DataFrame:
+    return pd.DataFrame(columns=_FOREX_HIST_COLUMNS)
+
+
 def forex_spot_em() -> pd.DataFrame:
     """
     东方财富网-行情中心-外汇市场-所有汇率-实时行情数据
@@ -34,7 +58,12 @@ def forex_spot_em() -> pd.DataFrame:
         "dect": "1",
         "wbp2u": "|0|0|0|web",
     }
-    temp_df = fetch_paginated_data(url, params)
+    try:
+        temp_df = fetch_paginated_data(url, params)
+    except Exception:
+        return _empty_forex_spot_em()
+    if temp_df is None or temp_df.empty:
+        return _empty_forex_spot_em()
     temp_df.rename(
         columns={
             "index": "序号",
@@ -84,7 +113,9 @@ def forex_hist_em(symbol: str = "USDCNH") -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-    market_code = symbol_market_map[symbol]
+    market_code = symbol_market_map.get(symbol)
+    if market_code is None:
+        return _empty_forex_hist_em()
     params = {
         "secid": f"{market_code}.{symbol}",
         "klt": "101",
@@ -97,11 +128,25 @@ def forex_hist_em(symbol: str = "USDCNH") -> pd.DataFrame:
         "ut": "f057cbcbce2a86e2866ab8877db1d059",
         "forcect": 1,
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    temp_df["code"] = data_json["data"]["code"]
-    temp_df["name"] = data_json["data"]["name"]
+    try:
+        r = requests.get(url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        return _empty_forex_hist_em()
+    if r.status_code != 200:
+        return _empty_forex_hist_em()
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        return _empty_forex_hist_em()
+    data = data_json.get("data")
+    if not data:
+        return _empty_forex_hist_em()
+    klines = data.get("klines") or []
+    if not klines:
+        return _empty_forex_hist_em()
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
+    temp_df["code"] = data["code"]
+    temp_df["name"] = data["name"]
     temp_df.columns = [
         "日期",
         "今开",

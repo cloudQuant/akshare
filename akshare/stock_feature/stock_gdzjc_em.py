@@ -35,12 +35,14 @@ def _get_ssl_session():
     return session
 
 
-def stock_ggcg_em(symbol: str = "全部") -> pd.DataFrame:
+def stock_ggcg_em(symbol: str = "全部", max_pages: int | None = None) -> pd.DataFrame:
     """
     东方财富网-数据中心-特色数据-高管持股
     https://data.eastmoney.com/executive/gdzjc.html
     :param symbol: choice of {"全部", "股东增持", "股东减持"}
     :type symbol: str
+    :param max_pages: 最多抓取页数; 默认 None 表示抓取全部页
+    :type max_pages: int | None
     :return: 高管持股
     :rtype: pandas.DataFrame
     """
@@ -63,9 +65,15 @@ def stock_ggcg_em(symbol: str = "全部") -> pd.DataFrame:
         "client": "WEB",
         "filter": symbol_map[symbol],
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["result"]["pages"]
+    result = data_json.get("result") or {}
+    total_page = int(result.get("pages") or 0)
+    if total_page <= 0:
+        return pd.DataFrame()
+    if max_pages is not None:
+        total_page = min(total_page, max(1, int(max_pages)))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
@@ -74,10 +82,15 @@ def stock_ggcg_em(symbol: str = "全部") -> pd.DataFrame:
                 "pageNumber": page,
             }
         )
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        temp_df = pd.DataFrame((data_json.get("result") or {}).get("data") or [])
+        if temp_df.empty:
+            continue
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+    if big_df.empty:
+        return pd.DataFrame()
 
     big_df.columns = [
         "持股变动信息-变动数量",

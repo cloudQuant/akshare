@@ -27,23 +27,45 @@ def index_global_name_table() -> pd.DataFrame:
     return temp_df
 
 
-def index_global_hist_sina(symbol: str = "OMX") -> pd.DataFrame:
+def index_global_hist_sina(symbol: str | None = None) -> pd.DataFrame:
     """
     新浪财经-行情中心-环球市场-历史行情
     https://finance.sina.com.cn/stock/globalindex/quotes/UKX
-    :param symbol: 指数名称；可以通过 ak.index_global_name_table() 获取
+    :param symbol: 指数名称；可以通过 ak.index_global_name_table() 获取; 默认为全部指数
     :type symbol: str
     :return: 环球市场历史行情
     :rtype: pandas.DataFrame
     """
+    columns = ["date", "open", "high", "low", "close", "volume"]
+    symbol = {"OMX": "瑞士股票指数"}.get(symbol, symbol)
+    if symbol in (None, "", "全部", "all"):
+        frames = []
+        for index_name in index_global_sina_symbol_map:
+            temp_df = index_global_hist_sina(symbol=index_name)
+            if temp_df.empty:
+                continue
+            temp_df.insert(0, "index_name", index_name)
+            frames.append(temp_df)
+        if not frames:
+            return pd.DataFrame(columns=["index_name", *columns])
+        return pd.concat(frames, ignore_index=True)
+    if symbol not in index_global_sina_symbol_map:
+        return pd.DataFrame(columns=columns)
     url = "https://gi.finance.sina.com.cn/hq/daily"
     params = {
         "symbol": index_global_sina_symbol_map[symbol],
         "num": "10000",
     }
-    r = requests.get(url=url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["result"]["data"])
+    try:
+        r = requests.get(url=url, params=params, timeout=15)
+        data_json = r.json()
+    except (requests.RequestException, ValueError):
+        return pd.DataFrame(columns=columns)
+    result = data_json.get("result") if isinstance(data_json, dict) else None
+    data = result.get("data") if isinstance(result, dict) else None
+    if not data:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame(data)
     temp_df.rename(
         columns={
             "d": "date",
@@ -55,16 +77,9 @@ def index_global_hist_sina(symbol: str = "OMX") -> pd.DataFrame:
         },
         inplace=True,
     )
-    temp_df = temp_df[
-        [
-            "date",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-        ]
-    ]
+    if not set(columns).issubset(temp_df.columns):
+        return pd.DataFrame(columns=columns)
+    temp_df = temp_df[columns]
     temp_df["date"] = pd.to_datetime(temp_df["date"], errors="coerce").dt.date
     temp_df["open"] = pd.to_numeric(temp_df["open"], errors="coerce")
     temp_df["high"] = pd.to_numeric(temp_df["high"], errors="coerce")

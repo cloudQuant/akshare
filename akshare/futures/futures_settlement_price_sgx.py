@@ -14,6 +14,42 @@ from io import StringIO
 import pandas as pd
 import requests
 
+from akshare.utils.request import request_eastmoney
+
+
+def __read_sgx_future_zip_date(content: bytes) -> str | None:
+    if not content.startswith(b"PK"):
+        return None
+    with zipfile.ZipFile(BytesIO(content)) as file:
+        with file.open(file.namelist()[0]) as my_file:
+            data = my_file.read(120).decode(errors="ignore")
+    for line in data.splitlines():
+        if line[:8].isdigit():
+            return line[:8]
+    return None
+
+
+def __search_sgx_future_file_num(date: str) -> int:
+    target_date = pd.to_datetime(date).strftime("%Y%m%d")
+    anchor_date = pd.Timestamp("2023-11-07")
+    anchor_num = 6853
+    query_date = pd.to_datetime(target_date)
+    if query_date >= anchor_date:
+        estimated_offset = len(pd.bdate_range(anchor_date, query_date)) - 1
+    else:
+        estimated_offset = -(len(pd.bdate_range(query_date, anchor_date)) - 1)
+    estimated_num = anchor_num + estimated_offset
+    for num in range(max(1, estimated_num - 90), estimated_num + 91):
+        url = f"https://links.sgx.com/1.0.0/derivatives-daily/{num}/FUTURE.zip"
+        try:
+            r = requests.get(url, timeout=15)
+        except requests.RequestException:
+            continue
+        file_date = __read_sgx_future_zip_date(r.content)
+        if file_date == target_date:
+            return num
+    raise RuntimeError(f"SGX FUTURE.zip not found for date={date}")
+
 
 def __fetch_ftse_index_futu(date: str = "20231108") -> int:
     """
@@ -37,9 +73,15 @@ def __fetch_ftse_index_futu(date: str = "20231108") -> int:
         "ut": "f057cbcbce2a86e2866ab8877db1d059",
         "forcect": "1",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
+    try:
+        r = request_eastmoney(url, params=params, timeout=15)
+        data_json = r.json()
+        klines = (data_json.get("data") or {}).get("klines") or []
+    except requests.RequestException:
+        klines = []
+    if not klines:
+        return __search_sgx_future_file_num(date)
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
     temp_df.columns = [
         "date",
         "-",

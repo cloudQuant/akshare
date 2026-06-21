@@ -13,6 +13,25 @@ import pandas as pd
 import requests
 
 from akshare.utils.func import fetch_paginated_data
+from akshare.utils.request import request_eastmoney
+
+
+def _get_eastmoney_lof_json(url: str, params: dict, endpoint_name: str):
+    try:
+        r = request_eastmoney(url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Eastmoney {endpoint_name} endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} endpoint returned HTTP {r.status_code}: {url}"
+        )
+    try:
+        return r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
 
 
 @lru_cache()
@@ -154,8 +173,7 @@ def fund_lof_hist_em(
         "beg": start_date,
         "end": end_date,
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
+    data_json = _get_eastmoney_lof_json(url, params, "LOF history")
     if not (data_json["data"] and data_json["data"]["klines"]):
         return pd.DataFrame()
     temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
@@ -226,10 +244,12 @@ def fund_lof_hist_min_em(
             "iscr": "0",
             "secid": f"{code_id_dict[symbol]}.{symbol}",
         }
-        r = requests.get(url, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_lof_json(url, params, "LOF minute history")
+        trends = (data_json.get("data") or {}).get("trends") or []
+        if not trends:
+            return pd.DataFrame()
         temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["trends"]]
+            [item.split(",") for item in trends]
         )
         temp_df.columns = [
             "时间",
@@ -265,10 +285,12 @@ def fund_lof_hist_min_em(
             "beg": "0",
             "end": "20500000",
         }
-        r = requests.get(url, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_lof_json(url, params, "LOF minute kline")
+        klines = (data_json.get("data") or {}).get("klines") or []
+        if not klines:
+            return pd.DataFrame()
         temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
+            [item.split(",") for item in klines]
         )
         temp_df.columns = [
             "时间",

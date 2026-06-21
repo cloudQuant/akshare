@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 """
-Date: 2024/12/14 15:00
+Date: 2026/1/20 17:00
 Desc: 东方财富网站-天天基金网-基金数据-开放式基金净值
 https://fund.eastmoney.com/manager/default.html#dt14;mcreturnjson;ftall;pn20;pi1;scabbname;stasc
 1.基金经理基本数据, 建议包含:基金经理代码,基金经理姓名,从业起始日期,现任基金公司,管理资产总规模,上述数据可在"基金经理列表:
@@ -425,6 +425,62 @@ def fund_open_fund_info_em(
         temp_df["累计净值"] = pd.to_numeric(temp_df["累计净值"], errors="coerce")
         return temp_df
 
+    # 每万份收益
+    if indicator == "每万份收益":
+        data_json = js_code.execute("Data_millionCopiesIncome")
+        temp_df = pd.DataFrame(data_json)
+        if temp_df.empty:
+            return pd.DataFrame()
+        temp_df.columns = ["x", "y"]
+        temp_df["x"] = pd.to_datetime(temp_df["x"], unit="ms", utc=True).dt.tz_convert(
+            "Asia/Shanghai"
+        )
+        temp_df["x"] = temp_df["x"].dt.date
+        temp_df.columns = [
+            "净值日期",
+            "每万份收益",
+        ]
+        temp_df = temp_df[
+            [
+                "净值日期",
+                "每万份收益",
+            ]
+        ]
+        temp_df["净值日期"] = pd.to_datetime(
+            temp_df["净值日期"], errors="coerce"
+        ).dt.date
+        temp_df["每万份收益"] = pd.to_numeric(temp_df["每万份收益"], errors="coerce")
+        return temp_df
+
+    # 7日年化收益率
+    if indicator == "7日年化收益率":
+        data_json = js_code.execute("Data_sevenDaysYearIncome")
+        temp_df = pd.DataFrame(data_json)
+        if temp_df.empty:
+            return pd.DataFrame()
+        temp_df.columns = ["x", "y"]
+        temp_df["x"] = pd.to_datetime(temp_df["x"], unit="ms", utc=True).dt.tz_convert(
+            "Asia/Shanghai"
+        )
+        temp_df["x"] = temp_df["x"].dt.date
+        temp_df.columns = [
+            "净值日期",
+            "7日年化收益率",
+        ]
+        temp_df = temp_df[
+            [
+                "净值日期",
+                "7日年化收益率",
+            ]
+        ]
+        temp_df["净值日期"] = pd.to_datetime(
+            temp_df["净值日期"], errors="coerce"
+        ).dt.date
+        temp_df["7日年化收益率"] = pd.to_numeric(
+            temp_df["7日年化收益率"], errors="coerce"
+        )
+        return temp_df
+
     # 累计收益率走势
     if indicator == "累计收益率走势":
         url = "https://api.fund.eastmoney.com/pinzhong/LJSYLZS"
@@ -577,15 +633,20 @@ def fund_money_fund_daily_em() -> pd.DataFrame:
     return temp_df
 
 
-def fund_money_fund_info_em(symbol: str = "000009") -> pd.DataFrame:
+def fund_money_fund_info_em(
+    symbol: str = "000009", max_pages: int | None = None
+) -> pd.DataFrame:
     """
     东方财富网-天天基金网-基金数据-货币型基金收益-历史净值数据
     https://fundf10.eastmoney.com/jjjz_004186.html
     :param symbol: 货币型基金代码, 可以通过 fund_money_fund_daily_em 来获取
     :type symbol: str
+    :param max_pages: 最多抓取页数; 默认 None 表示抓取全部历史页
+    :type max_pages: int | None
     :return: 东方财富网站-天天基金网-基金数据-货币型基金收益-历史净值数据
     :rtype: pandas.DataFrame
     """
+    columns = ["净值日期", "每万份收益", "7日年化收益率", "申购状态", "赎回状态"]
     url = "https://api.fund.eastmoney.com/f10/lsjz"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -601,35 +662,60 @@ def fund_money_fund_info_em(symbol: str = "000009") -> pd.DataFrame:
         "endDate": "",
         "_": round(time.time() * 1000),
     }
-    r = requests.get(url, params=params, headers=headers)
-    data_json = r.json()
-    total_page = math.ceil(int(data_json["TotalCount"]) / 20)
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        data_json = r.json()
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"Eastmoney money fund history request failed for {symbol}: {exc}"
+        ) from exc
+    except ValueError as exc:
+        raise RuntimeError(f"Eastmoney money fund history returned invalid JSON for {symbol}") from exc
+
+    total_count = int(data_json.get("TotalCount") or 0)
+    if total_count <= 0:
+        return pd.DataFrame(columns=columns)
+    total_page = math.ceil(total_count / 20)
+    if max_pages is not None:
+        total_page = min(total_page, max(1, int(max_pages)))
+
     tqdm = get_tqdm()
     big_list = []
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pageIndex": page})
-        r = requests.get(url, params=params, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["Data"]["LSJZList"])
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=15)
+            r.raise_for_status()
+            data_json = r.json()
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"Eastmoney money fund history request failed for {symbol} page {page}: {exc}"
+            ) from exc
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Eastmoney money fund history returned invalid JSON for {symbol} page {page}"
+            ) from exc
+        records = (data_json.get("Data") or {}).get("LSJZList") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_list.append(temp_df)
+    if not big_list:
+        return pd.DataFrame(columns=columns)
     big_df = pd.concat(big_list, ignore_index=True)
-    big_df.columns = [
-        "净值日期",
-        "每万份收益",
-        "7日年化收益率",
-        "_",
-        "_",
-        "_",
-        "_",
-        "申购状态",
-        "赎回状态",
-        "_",
-        "_",
-        "_",
-        "_",
-    ]
+    big_df.rename(
+        columns={
+            "FSRQ": "净值日期",
+            "DWJZ": "每万份收益",
+            "LJJZ": "7日年化收益率",
+            "SGZT": "申购状态",
+            "SHZT": "赎回状态",
+        },
+        inplace=True,
+    )
     big_df.sort_values(by=["净值日期"], inplace=True, ignore_index=True)
-    big_df = big_df[["净值日期", "每万份收益", "7日年化收益率", "申购状态", "赎回状态"]]
+    big_df = big_df[columns]
     big_df["净值日期"] = pd.to_datetime(big_df["净值日期"], errors="coerce").dt.date
     big_df["每万份收益"] = pd.to_numeric(big_df["每万份收益"], errors="coerce")
     big_df["7日年化收益率"] = pd.to_numeric(big_df["7日年化收益率"], errors="coerce")
@@ -719,13 +805,7 @@ def fund_financial_fund_info_em(symbol: str = "000134") -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     url = "https://api.fund.eastmoney.com/f10/lsjz"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/80.0.3987.149 Safari/537.36",
-        "Referer": f"https://fundf10.eastmoney.com/jjjz_{symbol}.html",
-    }
     params = {
-        "callback": "jQuery18307915911837995662_1588249228826",
         "fundCode": symbol,
         "pageIndex": "1",
         "pageSize": "10000",
@@ -733,9 +813,8 @@ def fund_financial_fund_info_em(symbol: str = "000134") -> pd.DataFrame:
         "endDate": "",
         "_": round(time.time() * 1000),
     }
-    r = requests.get(url, params=params, headers=headers)
-    text_data = r.text
-    data_json = demjson.decode(text_data[text_data.find("{") : -1])
+    r = requests.get(url, params=params)
+    data_json = r.json()
     temp_df = pd.DataFrame(data_json["Data"]["LSJZList"])
     temp_df.columns = [
         "净值日期",
@@ -764,7 +843,7 @@ def fund_financial_fund_info_em(symbol: str = "000134") -> pd.DataFrame:
         ]
     ]
     temp_df.sort_values(["净值日期"], inplace=True, ignore_index=True)
-    temp_df["净值日期"] = pd.to_datetime(temp_df["净值日期"]).dt.date
+    temp_df["净值日期"] = pd.to_datetime(temp_df["净值日期"], errors="coerce").dt.date
     temp_df["单位净值"] = pd.to_numeric(temp_df["单位净值"], errors="coerce")
     temp_df["累计净值"] = pd.to_numeric(temp_df["累计净值"], errors="coerce")
     temp_df["日增长率"] = pd.to_numeric(temp_df["日增长率"], errors="coerce")
@@ -822,6 +901,7 @@ def fund_graded_fund_daily_em() -> pd.DataFrame:
         "-",
         "-",
         "手续费",
+        "-",
     ]
     data_df = temp_df[
         [
@@ -841,15 +921,20 @@ def fund_graded_fund_daily_em() -> pd.DataFrame:
     return data_df
 
 
-def fund_graded_fund_info_em(symbol: str = "150232") -> pd.DataFrame:
+def fund_graded_fund_info_em(
+    symbol: str = "150232", max_pages: int | None = None
+) -> pd.DataFrame:
     """
     东方财富网站-天天基金网-基金数据-分级基金净值-历史净值明细
     https://fundf10.eastmoney.com/jjjz_150232.html
     :param symbol: 分级基金代码, 可以通过 ak.fund_money_fund_daily_em() 来获取
     :type symbol: str
+    :param max_pages: 最多抓取页数; 默认 None 表示抓取全部历史页
+    :type max_pages: int | None
     :return: 东方财富网站-天天基金网-基金数据-分级基金净值-历史净值明细
     :rtype: pandas.DataFrame
     """
+    columns = ["净值日期", "单位净值", "累计净值", "日增长率", "申购状态", "赎回状态"]
     url = "https://api.fund.eastmoney.com/f10/lsjz"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -864,37 +949,61 @@ def fund_graded_fund_info_em(symbol: str = "150232") -> pd.DataFrame:
         "endDate": "",
         "_": round(time.time() * 1000),
     }
-    r = requests.get(url, params=params, headers=headers)
-    data_json = r.json()
-    total_page = math.ceil(int(data_json["TotalCount"]) / 20)
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        data_json = r.json()
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"Eastmoney graded fund history request failed for {symbol}: {exc}"
+        ) from exc
+    except ValueError as exc:
+        raise RuntimeError(f"Eastmoney graded fund history returned invalid JSON for {symbol}") from exc
+
+    total_count = int(data_json.get("TotalCount") or 0)
+    if total_count <= 0:
+        return pd.DataFrame(columns=columns)
+    total_page = math.ceil(total_count / 20)
+    if max_pages is not None:
+        total_page = min(total_page, max(1, int(max_pages)))
+
     tqdm = get_tqdm()
     big_list = []
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pageIndex": page})
-        r = requests.get(url, params=params, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["Data"]["LSJZList"])
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=15)
+            r.raise_for_status()
+            data_json = r.json()
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"Eastmoney graded fund history request failed for {symbol} page {page}: {exc}"
+            ) from exc
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Eastmoney graded fund history returned invalid JSON for {symbol} page {page}"
+            ) from exc
+        records = (data_json.get("Data") or {}).get("LSJZList") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_list.append(temp_df)
+    if not big_list:
+        return pd.DataFrame(columns=columns)
     big_df = pd.concat(big_list, ignore_index=True)
-    big_df.columns = [
-        "净值日期",
-        "单位净值",
-        "累计净值",
-        "_",
-        "_",
-        "_",
-        "日增长率",
-        "申购状态",
-        "赎回状态",
-        "_",
-        "_",
-        "_",
-        "_",
-    ]
+    big_df.rename(
+        columns={
+            "FSRQ": "净值日期",
+            "DWJZ": "单位净值",
+            "LJJZ": "累计净值",
+            "JZZZL": "日增长率",
+            "SGZT": "申购状态",
+            "SHZT": "赎回状态",
+        },
+        inplace=True,
+    )
     big_df.sort_values(by=["净值日期"], inplace=True, ignore_index=True)
-    big_df = big_df[
-        ["净值日期", "单位净值", "累计净值", "日增长率", "申购状态", "赎回状态"]
-    ]
+    big_df = big_df[columns]
     big_df["净值日期"] = pd.to_datetime(big_df["净值日期"], errors="coerce").dt.date
     big_df["单位净值"] = pd.to_numeric(big_df["单位净值"], errors="coerce")
     big_df["累计净值"] = pd.to_numeric(big_df["累计净值"], errors="coerce")
@@ -917,7 +1026,7 @@ def fund_etf_fund_daily_em() -> pd.DataFrame:
     temp_df_columns = temp_df.iloc[0, :].tolist()[1:]
     temp_df = temp_df.iloc[1:, 1:]
     temp_df.columns = temp_df_columns
-    temp_df["基金简称"] = temp_df["基金简称"].str.replace("行情吧档案", '')
+    temp_df["基金简称"] = temp_df["基金简称"].str.replace("行情吧档案", "")
     temp_df.reset_index(inplace=True, drop=True)
     temp_df.columns = [
         "基金代码",
@@ -1121,6 +1230,15 @@ def fund_hk_fund_hist_em(
         }
         r = requests.get(url, params=params, headers=headers)
         data_json = r.json()
+        target_columns = [
+            "净值日期",
+            "单位净值",
+            "日增长值",
+            "日增长率",
+            "单位",
+        ]
+        if not data_json.get("Data"):
+            return pd.DataFrame(columns=target_columns)
         temp_one_df = pd.DataFrame(data_json["Data"])
         temp_one_df.columns = [
             "_",
@@ -1135,15 +1253,7 @@ def fund_hk_fund_hist_em(
             "单位",
             "_",
         ]
-        temp_one_df = temp_one_df[
-            [
-                "净值日期",
-                "单位净值",
-                "日增长值",
-                "日增长率",
-                "单位",
-            ]
-        ]
+        temp_one_df = temp_one_df[target_columns]
     else:
         params = {
             "api": "HKFDApi",
@@ -1157,6 +1267,16 @@ def fund_hk_fund_hist_em(
         }
         r = requests.get(url, params=params, headers=headers)
         data_json = r.json()
+        target_columns = [
+            "年份",
+            "权益登记日",
+            "除息日",
+            "分红发放日",
+            "分红金额",
+            "单位",
+        ]
+        if not data_json.get("Data"):
+            return pd.DataFrame(columns=target_columns)
         temp_one_df = pd.DataFrame(data_json["Data"])
         temp_one_df.columns = [
             "_",
@@ -1173,17 +1293,9 @@ def fund_hk_fund_hist_em(
             "单位",
             "_",
             "_",
+            "_",
         ]
-        temp_one_df = temp_one_df[
-            [
-                "年份",
-                "权益登记日",
-                "除息日",
-                "分红发放日",
-                "分红金额",
-                "单位",
-            ]
-        ]
+        temp_one_df = temp_one_df[target_columns]
     return temp_one_df
 
 

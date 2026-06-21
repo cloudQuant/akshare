@@ -9,6 +9,7 @@ http://webapi.cninfo.com.cn/#/thematicStatistics?name=%E6%8A%95%E8%B5%84%E8%AF%8
 import pandas as pd
 import requests
 import py_mini_racer
+from datetime import datetime, timedelta
 
 from akshare.datasets import get_ths_js
 
@@ -28,24 +29,20 @@ def _get_file_content_ths(file: str = "cninfo.js") -> str:
 
 
 def stock_industry_pe_ratio_cninfo(
-    symbol: str = "证监会行业分类", date: str = "20210910"
+    symbol: str = "证监会行业分类", date: str | None = None
 ) -> pd.DataFrame:
     """
     巨潮资讯-数据中心-行业分析-行业市盈率
     http://webapi.cninfo.com.cn/#/thematicStatistics
     :param symbol: choice of {"证监会行业分类", "国证行业分类"}
     :type symbol: str
-    :param date: 查询日期
+    :param date: 查询日期; 不传时自动向前查找最近可用日期
     :type date: str
     :return: 行业市盈率
     :rtype: pandas.DataFrame
     """
     sort_code_map = {"证监会行业分类": "008001", "国证行业分类": "008200"}
-    url = "http://webapi.cninfo.com.cn/api/sysapi/p_sysapi1087"
-    params = {
-        "tdate": "-".join([date[:4], date[4:6], date[6:]]),
-        "sortcode": sort_code_map[symbol],
-    }
+    url = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1087"
     js_code = py_mini_racer.MiniRacer()
     js_content = _get_file_content_ths("cninfo.js")
     js_code.eval(js_content)
@@ -58,18 +55,54 @@ def stock_industry_pe_ratio_cninfo(
         "Content-Length": "0",
         "Host": "webapi.cninfo.com.cn",
         "Accept-Enckey": mcode,
-        "Origin": "http://webapi.cninfo.com.cn",
+        "Origin": "https://webapi.cninfo.com.cn",
         "Pragma": "no-cache",
         "Proxy-Connection": "keep-alive",
-        "Referer": "http://webapi.cninfo.com.cn/",
+        "Referer": "https://webapi.cninfo.com.cn/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/93.0.4577.63 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
     }
-    r = requests.post(url, params=params, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["records"])
-    temp_df.columns = [
+
+    def _format_date(value: str) -> str:
+        return "-".join([value[:4], value[4:6], value[6:]])
+
+    if date:
+        date_candidates = [date]
+    else:
+        today = datetime.now().date()
+        date_candidates = [
+            (today - timedelta(days=offset)).strftime("%Y%m%d")
+            for offset in range(10)
+        ]
+
+    last_error: Exception | None = None
+    data_json = None
+    for candidate_date in date_candidates:
+        params = {
+            "tdate": _format_date(candidate_date),
+            "sortcode": sort_code_map[symbol],
+        }
+        try:
+            r = requests.post(url, params=params, headers=headers, timeout=15)
+            r.raise_for_status()
+            candidate_json = r.json()
+        except (requests.RequestException, ValueError) as exc:
+            last_error = exc
+            if date:
+                raise RuntimeError(
+                    f"CNInfo industry PE endpoint request failed: {url}"
+                ) from exc
+            continue
+        if candidate_json.get("records"):
+            data_json = candidate_json
+            break
+        if date:
+            data_json = candidate_json
+            break
+    if data_json is None:
+        raise RuntimeError(f"CNInfo industry PE endpoint request failed: {url}") from last_error
+    columns = [
         "行业层级",
         "静态市盈率-算术平均",
         "静态市盈率-中位数",
@@ -83,6 +116,26 @@ def stock_industry_pe_ratio_cninfo(
         "变动日期",
         "公司数量",
     ]
+    records = data_json.get("records") or []
+    if not records:
+        return pd.DataFrame(
+            columns=[
+                "变动日期",
+                "行业分类",
+                "行业层级",
+                "行业编码",
+                "行业名称",
+                "公司数量",
+                "纳入计算公司数量",
+                "总市值-静态",
+                "净利润-静态",
+                "静态市盈率-加权平均",
+                "静态市盈率-中位数",
+                "静态市盈率-算术平均",
+            ]
+        )
+    temp_df = pd.DataFrame(records)
+    temp_df.columns = columns
     temp_df = temp_df[
         [
             "变动日期",

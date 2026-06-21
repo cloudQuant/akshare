@@ -25,8 +25,9 @@ def futures_contract_info_cffex(date: str = "20240228") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
     }
     url = f"http://www.cffex.com.cn/sj/jycs/{date[:6]}/{date[6:]}/index.xml"
-    r = requests.get(url, headers=headers)
-    xml_data = r.text
+    r = requests.get(url, headers=headers, timeout=15)
+    r.raise_for_status()
+    xml_data = r.text.replace("&nbsp;", " ")
     # 解析 XML
     tree = ET.ElementTree(ET.fromstring(xml_data))
     root = tree.getroot()

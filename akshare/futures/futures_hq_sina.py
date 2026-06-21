@@ -100,7 +100,9 @@ def futures_hq_subscribe_exchange_symbol() -> pd.DataFrame:
     return temp_df
 
 
-def futures_foreign_commodity_realtime(symbol: Union[str, List[str]]) -> pd.DataFrame:
+def futures_foreign_commodity_realtime(
+    symbol: Union[str, List[str], None] = None
+) -> pd.DataFrame:
     """
     新浪-外盘期货-行情数据
     https://finance.sina.com.cn/money/future/hf.html
@@ -109,11 +111,21 @@ def futures_foreign_commodity_realtime(symbol: Union[str, List[str]]) -> pd.Data
     :return: 行情数据
     :rtype: pandas.DataFrame
     """
-    if isinstance(symbol, list):
-        payload = "?list=" + ",".join(["hf_" + item for item in symbol])
+    if symbol is None:
+        subscribes = futures_foreign_commodity_subscribe_exchange_symbol()
+        if isinstance(subscribes, pd.DataFrame):
+            if subscribes.empty or "code" not in subscribes.columns:
+                return pd.DataFrame()
+            symbol = subscribes["code"].dropna().astype(str).tolist()
+        else:
+            symbol = [str(item) for item in subscribes if item]
+    elif isinstance(symbol, str):
+        symbol = [item.strip() for item in symbol.split(",") if item.strip()]
     else:
-        symbol = symbol.split(",")
-        payload = "?list=" + ",".join(["hf_" + item for item in symbol])
+        symbol = [str(item) for item in symbol if item]
+    if not symbol:
+        return pd.DataFrame()
+    payload = "?list=" + ",".join(["hf_" + item for item in symbol])
     url = "https://hq.sinajs.cn/" + payload
     headers = {
         "Accept": "*/*",
@@ -133,20 +145,21 @@ def futures_foreign_commodity_realtime(symbol: Union[str, List[str]]) -> pd.Data
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/97.0.4692.71 Safari/537.36",
     }
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, timeout=15)
     data_text = r.text
     raw_data = [
         item.strip().split("=")[1].split(",")
         for item in data_text.split(";")
         if item.strip() != "" and "=" in item.strip()
     ]
+    raw_data = [item for item in raw_data if len(item) > 1 or item[0].strip('"')]
     if not raw_data:
         return pd.DataFrame()
-    
+
     data_df = pd.DataFrame(raw_data)
     if data_df.empty:
         return pd.DataFrame()
-    
+
     data_df.iloc[:, 0] = data_df.iloc[:, 0].str.replace('"', "")
     data_df.iloc[:, -1] = data_df.iloc[:, -1].str.replace('"', "")
 
@@ -180,7 +193,10 @@ def futures_foreign_commodity_realtime(symbol: Union[str, List[str]]) -> pd.Data
     temp_symbol_code_dict = dict(
         zip(temp_symbol_code_df["code"], temp_symbol_code_df["symbol"])
     )
-    data_df["symbol"] = [temp_symbol_code_dict[subscribe] for subscribe in symbol]
+    data_df["symbol"] = [
+        temp_symbol_code_dict.get(subscribe, subscribe)
+        for subscribe in symbol[: len(data_df)]
+    ]
     data_df = data_df[
         [
             "symbol",
@@ -245,40 +261,40 @@ def futures_foreign_commodity_realtime(symbol: Union[str, List[str]]) -> pd.Data
     ]
 
     # 获取转换比例数据
-    url = "https://finance.sina.com.cn/money/future/hf.html"
-    r = requests.get(url)
-    r.encoding = "utf-8"
-    soup = BeautifulSoup(r.text, features="lxml")
-    data_text = soup.find_all(name="script", attrs={"type": "text/javascript"})[
-        -2
-    ].string.strip()
-    raw_text = data_text[data_text.find("oHF_1 = ") : data_text.find("oHF_2")]
-    need_text = raw_text[raw_text.find("{") : raw_text.rfind("}") + 1]
-    data_json = demjson.decode(need_text)
-    price_mul = pd.DataFrame(
-        [
-            [item[0] for item in data_json.values()],
-            [item[1][0] for item in data_json.values()],
-        ]
-    ).T
-    price_mul.columns = ["symbol", "price"]
-    price_mul = price_mul[price_mul["symbol"].isin(data_df["名称"])]
-    price_mul.reset_index(inplace=True, drop=True)
-    price_mul["price"] = pd.to_numeric(price_mul["price"], errors="coerce")
-
-    # 获取汇率数据
-    url = "https://hq.sinajs.cn/?list=USDCNY"
-    r = requests.get(url, headers=headers)
-    data_text = r.text
-    usd_rmb = float(
-        data_text[data_text.find('"') + 1 : data_text.find(",美元人民币")].split(",")[
-            -1
-        ]
-    )
-
-    # 计算人民币报价
     data_df["最新价"] = pd.to_numeric(data_df["最新价"], errors="coerce")
-    data_df["人民币报价"] = data_df["最新价"] * price_mul["price"] * float(usd_rmb)
+    try:
+        url = "https://finance.sina.com.cn/money/future/hf.html"
+        r = requests.get(url, timeout=15)
+        r.encoding = "utf-8"
+        soup = BeautifulSoup(r.text, features="lxml")
+        scripts = soup.find_all(name="script", attrs={"type": "text/javascript"})
+        if len(scripts) >= 2 and scripts[-2].string:
+            data_text = scripts[-2].string.strip()
+            raw_text = data_text[data_text.find("oHF_1 = ") : data_text.find("oHF_2")]
+            need_text = raw_text[raw_text.find("{") : raw_text.rfind("}") + 1]
+            data_json = demjson.decode(need_text)
+            price_mul = pd.DataFrame(
+                [
+                    [item[0] for item in data_json.values()],
+                    [item[1][0] for item in data_json.values()],
+                ]
+            ).T
+            price_mul.columns = ["symbol", "price"]
+            price_mul = price_mul[price_mul["symbol"].isin(data_df["名称"])]
+            price_mul.reset_index(inplace=True, drop=True)
+            price_mul["price"] = pd.to_numeric(price_mul["price"], errors="coerce")
+
+            url = "https://hq.sinajs.cn/?list=USDCNY"
+            r = requests.get(url, headers=headers, timeout=15)
+            data_text = r.text
+            usd_rmb = float(
+                data_text[
+                    data_text.find('"') + 1 : data_text.find(",美元人民币")
+                ].split(",")[-1]
+            )
+            data_df["人民币报价"] = data_df["最新价"] * price_mul["price"] * float(usd_rmb)
+    except Exception:
+        pass
     data_df.dropna(thresh=4, inplace=True)
     return data_df
 

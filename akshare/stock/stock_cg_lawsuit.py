@@ -6,41 +6,99 @@ Desc: 巨潮资讯-数据中心-专题统计-公司治理-公司诉讼
 http://webapi.cninfo.com.cn/#/thematicStatistics
 """
 
-import time
-
 import pandas as pd
 import requests
 import py_mini_racer
 
-js_str = """
-    function mcode(input) {
-                var keyStr = "ABCDEFGHIJKLMNOP" + "QRSTUVWXYZabcdef" + "ghijklmnopqrstuv"   + "wxyz0123456789+/" + "=";
-                var output = "";
-                var chr1, chr2, chr3 = "";
-                var enc1, enc2, enc3, enc4 = "";
-                var i = 0;
-                do {
-                    chr1 = input.charCodeAt(i++);
-                    chr2 = input.charCodeAt(i++);
-                    chr3 = input.charCodeAt(i++);
-                    enc1 = chr1 >> 2;
-                    enc2 = ((chr1 & 3) << 4) | (chr2 >> 4);
-                    enc3 = ((chr2 & 15) << 2) | (chr3 >> 6);
-                    enc4 = chr3 & 63;
-                    if (isNaN(chr2)) {
-                        enc3 = enc4 = 64;
-                    } else if (isNaN(chr3)) {
-                        enc4 = 64;
-                    }
-                    output = output + keyStr.charAt(enc1) + keyStr.charAt(enc2)
-                            + keyStr.charAt(enc3) + keyStr.charAt(enc4);
-                    chr1 = chr2 = chr3 = "";
-                    enc1 = enc2 = enc3 = enc4 = "";
-                } while (i < input.length);
+from akshare.datasets import get_ths_js
 
-                return output;
-            }
-"""
+
+_STOCK_CG_LAWSUIT_COLUMNS = ["证券代码", "证券简称", "公告统计区间", "诉讼次数", "诉讼金额"]
+
+
+def _get_file_content_ths(file: str = "cninfo.js") -> str:
+    setting_file_path = get_ths_js(file)
+    with open(setting_file_path, encoding="utf-8") as f:
+        return f.read()
+
+
+def _get_cninfo_res_code() -> str:
+    js_code = py_mini_racer.MiniRacer()
+    js_code.eval(_get_file_content_ths("cninfo.js"))
+    return js_code.call("getResCode1")
+
+
+def _lawsuit_records_to_df(records: list[dict]) -> pd.DataFrame:
+    if not records:
+        return pd.DataFrame(columns=_STOCK_CG_LAWSUIT_COLUMNS)
+    temp_df = pd.DataFrame(records)
+    temp_df.columns = [
+        "公告统计区间",
+        "诉讼金额",
+        "诉讼次数",
+        "证券简称",
+        "证券代码",
+    ]
+    temp_df = temp_df[_STOCK_CG_LAWSUIT_COLUMNS]
+    temp_df["诉讼次数"] = pd.to_numeric(temp_df["诉讼次数"])
+    temp_df["诉讼金额"] = pd.to_numeric(temp_df["诉讼金额"])
+    return temp_df
+
+
+def _post_cninfo_with_browser(url: str, params: dict, accept_enckey: str) -> dict:
+    try:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError(
+            "CNInfo API is protected by browser context; install playwright to fetch it."
+        ) from exc
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(
+            locale="zh-CN",
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        )
+        try:
+            page.goto(
+                "https://webapi.cninfo.com.cn/#/thematicStatistics",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except PlaywrightTimeoutError:
+                pass
+            data_json = page.evaluate(
+                """async ({url, params, acceptEnckey}) => {
+                    const apiUrl = new URL(url);
+                    Object.entries(params).forEach(([key, value]) => {
+                        apiUrl.searchParams.set(key, value);
+                    });
+                    const response = await fetch(apiUrl.toString(), {
+                        method: "POST",
+                        headers: {
+                            Accept: "*/*",
+                            "Accept-Enckey": acceptEnckey,
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
+                    });
+                    const text = await response.text();
+                    if (!response.ok) {
+                        throw new Error(`CNInfo HTTP ${response.status}: ${text.slice(0, 120)}`);
+                    }
+                    return JSON.parse(text);
+                }""",
+                {"url": url, "params": params, "acceptEnckey": accept_enckey},
+            )
+        finally:
+            browser.close()
+    return data_json
 
 
 def stock_cg_lawsuit_cninfo(
@@ -65,11 +123,8 @@ def stock_cg_lawsuit_cninfo(
         "创业板": "012015",
         "科创板": "012029",
     }
-    url = "http://webapi.cninfo.com.cn/api/sysapi/p_sysapi1055"
-    random_time_str = str(int(time.time()))
-    js_code = py_mini_racer.MiniRacer()
-    js_code.eval(js_str)
-    mcode = js_code.call("mcode", random_time_str)
+    url = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1055"
+    mcode = _get_cninfo_res_code()
     headers = {
         "Accept": "*/*",
         "Accept-Encoding": "gzip, deflate",
@@ -77,11 +132,11 @@ def stock_cg_lawsuit_cninfo(
         "Cache-Control": "no-cache",
         "Content-Length": "0",
         "Host": "webapi.cninfo.com.cn",
-        "mcode": mcode,
-        "Origin": "http://webapi.cninfo.com.cn",
+        "Accept-Enckey": mcode,
+        "Origin": "https://webapi.cninfo.com.cn",
         "Pragma": "no-cache",
         "Proxy-Connection": "keep-alive",
-        "Referer": "http://webapi.cninfo.com.cn/",
+        "Referer": "https://webapi.cninfo.com.cn/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
     }
@@ -90,28 +145,19 @@ def stock_cg_lawsuit_cninfo(
         "edate": "-".join([end_date[:4], end_date[4:6], end_date[6:]]),
         "market": symbol_map[symbol],
     }
-    r = requests.post(url, headers=headers, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["records"])
-    temp_df.columns = [
-        "公告统计区间",
-        "诉讼金额",
-        "诉讼次数",
-        "证券简称",
-        "证券代码",
-    ]
-    temp_df = temp_df[
-        [
-            "证券代码",
-            "证券简称",
-            "公告统计区间",
-            "诉讼次数",
-            "诉讼金额",
-        ]
-    ]
-    temp_df["诉讼次数"] = pd.to_numeric(temp_df["诉讼次数"])
-    temp_df["诉讼金额"] = pd.to_numeric(temp_df["诉讼金额"])
-    return temp_df
+    try:
+        r = requests.post(url, headers=headers, params=params, timeout=15)
+        r.raise_for_status()
+        data_json = r.json()
+    except (requests.RequestException, ValueError):
+        data_json = _post_cninfo_with_browser(url, params, mcode)
+    if data_json.get("resultcode") not in (None, 200, "200"):
+        raise RuntimeError(
+            f"CNInfo lawsuit endpoint returned resultcode "
+            f"{data_json.get('resultcode')}: {data_json.get('resultmsg', '')}"
+        )
+    records = data_json.get("records") or []
+    return _lawsuit_records_to_df(records)
 
 
 if __name__ == "__main__":

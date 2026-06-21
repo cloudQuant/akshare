@@ -236,16 +236,23 @@ def futures_zh_spot(
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/97.0.4692.71 Safari/537.36",
     }
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, timeout=15)
     raw_data = [
         item.strip().split("=")[1].split(",")
         for item in r.text.split(";")
         if item.strip() != "" and "=" in item.strip()
     ]
+    raw_data = [
+        item
+        for item in raw_data
+        if len(item) > 1 and any(str(value).strip().strip('"') for value in item)
+    ]
     if not raw_data:
         return pd.DataFrame()
     data_df = pd.DataFrame(raw_data)
     if data_df.empty:
+        return pd.DataFrame()
+    if data_df.shape[1] <= 1:
         return pd.DataFrame()
     data_df.iloc[:, 0] = data_df.iloc[:, 0].str.replace('"', "")
     data_df.iloc[:, -1] = data_df.iloc[:, -1].str.replace('"', "")
@@ -372,7 +379,7 @@ def futures_zh_spot(
                 "_",
                 "_",
                 "_",
-                "_" "_",
+                "__",
                 "time",
                 "_",
                 "_",
@@ -574,7 +581,7 @@ def futures_zh_spot(
                 "_",
                 "_",
                 "_",
-                "_" "_",
+                "__",
                 "time",
                 "_",
                 "_",

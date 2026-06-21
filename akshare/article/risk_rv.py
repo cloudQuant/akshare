@@ -15,6 +15,24 @@ from bs4 import BeautifulSoup
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+def _empty_article_rlab_rv() -> pd.Series:
+    return pd.Series(
+        [],
+        index=pd.Index([], name="date"),
+        name="RV",
+        dtype="float64",
+    )
+
+
+def _empty_realized_volatility(name: str) -> pd.Series:
+    return pd.Series(
+        [],
+        index=pd.Index([], name="date"),
+        name=name,
+        dtype="float64",
+    )
+
+
 def article_oman_rv(symbol: str = "FTSE", index: str = "rk_th2") -> pd.DataFrame:
     """
     Oxford-Man Institute of Quantitative Finance Realized Library 的数据
@@ -62,16 +80,29 @@ def article_oman_rv(symbol: str = "FTSE", index: str = "rk_th2") -> pd.DataFrame
     | .STOXX50E | EURO STOXX 50                             | January 03, 2000   | November 28, 2019 |
     """
     url = "https://realized.oxford-man.ox.ac.uk/theme/js/visualization-data.js?20191111113154"
-    res = requests.get(url)
+    try:
+        res = requests.get(url, timeout=15)
+    except requests.RequestException:
+        return _empty_realized_volatility(f"{symbol}-{index}")
+    if res.status_code != 200:
+        return _empty_realized_volatility(f"{symbol}-{index}")
     soup = BeautifulSoup(res.text, "lxml")
-    soup_text = soup.find("p").get_text()
-    data_json = json.loads(soup_text[soup_text.find("{") : soup_text.rfind("};") + 1])
-    date_list = data_json[f".{symbol}"]["dates"]
-    temp_df = pd.DataFrame([date_list, data_json[f".{symbol}"][index]["data"]]).T
-    temp_df.index = pd.to_datetime(temp_df.iloc[:, 0], unit="ms")
-    temp_df = temp_df.iloc[:, 1]
-    temp_df.index.name = "date"
-    temp_df.name = f"{symbol}-{index}"
+    node = soup.find("p")
+    if node is None:
+        return _empty_realized_volatility(f"{symbol}-{index}")
+    try:
+        soup_text = node.get_text()
+        data_json = json.loads(
+            soup_text[soup_text.find("{") : soup_text.rfind("};") + 1]
+        )
+        date_list = data_json[f".{symbol}"]["dates"]
+        temp_df = pd.DataFrame([date_list, data_json[f".{symbol}"][index]["data"]]).T
+        temp_df.index = pd.to_datetime(temp_df.iloc[:, 0], unit="ms")
+        temp_df = temp_df.iloc[:, 1]
+        temp_df.index.name = "date"
+        temp_df.name = f"{symbol}-{index}"
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
+        return _empty_realized_volatility(f"{symbol}-{index}")
     return temp_df
 
 
@@ -102,15 +133,28 @@ def article_oman_rv_short(symbol: str = "FTSE") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.97 Safari/537.36",
     }
 
-    res = requests.get(url, headers=headers, verify=False)
+    try:
+        res = requests.get(url, headers=headers, verify=False, timeout=15)
+    except requests.RequestException:
+        return _empty_realized_volatility(symbol)
+    if res.status_code != 200:
+        return _empty_realized_volatility(symbol)
     soup = BeautifulSoup(res.text, "lxml")
-    soup_text = soup.find("p").get_text()
-    data_json = json.loads(soup_text[soup_text.find("{") : soup_text.rfind("}") + 1])
-    temp_df = pd.DataFrame(data_json[f".{symbol}"]["data"])
-    temp_df.index = pd.to_datetime(temp_df.iloc[:, 0], unit="ms")
-    temp_df = temp_df.iloc[:, 1]
-    temp_df.index.name = "date"
-    temp_df.name = f"{symbol}"
+    node = soup.find("p")
+    if node is None:
+        return _empty_realized_volatility(symbol)
+    try:
+        soup_text = node.get_text()
+        data_json = json.loads(
+            soup_text[soup_text.find("{") : soup_text.rfind("}") + 1]
+        )
+        temp_df = pd.DataFrame(data_json[f".{symbol}"]["data"])
+        temp_df.index = pd.to_datetime(temp_df.iloc[:, 0], unit="ms")
+        temp_df = temp_df.iloc[:, 1]
+        temp_df.index.name = "date"
+        temp_df.name = f"{symbol}"
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
+        return _empty_realized_volatility(symbol)
     return temp_df
 
 
@@ -154,29 +198,42 @@ def article_rlab_rv(symbol: str = "39693") -> pd.DataFrame:
     print("由于服务器在国外, 请稍后, 如果访问失败, 请使用代理工具")
     url = "https://dachxiu.chicagobooth.edu/data.php"
     payload = {"ticker": symbol}
-    res = requests.get(url, params=payload, verify=False)
+    try:
+        res = requests.get(url, params=payload, verify=False, timeout=15)
+    except requests.RequestException:
+        return _empty_article_rlab_rv()
+    if res.status_code != 200:
+        return _empty_article_rlab_rv()
     soup = BeautifulSoup(res.text, "lxml")
-    title_fore = (
-        pd.DataFrame(soup.find("p").get_text().split(symbol)).iloc[0, 0].strip()
-    )
-    title_list = (
-        pd.DataFrame(soup.find("p").get_text().split(symbol))
-        .iloc[1, 0]
-        .strip()
-        .split("\n")
-    )
-    title_list.insert(0, title_fore)
-    temp_df = pd.DataFrame(soup.find("p").get_text().split(symbol)).iloc[2:, :]
-    temp_df = temp_df.iloc[:, 0].str.split(" ", expand=True)
-    temp_df = temp_df.iloc[:, 1:]
-    temp_df.iloc[:, -1] = temp_df.iloc[:, -1].str.replace(r"\n", "")
-    temp_df.reset_index(inplace=True)
-    temp_df.index = pd.to_datetime(temp_df.iloc[:, 1], format="%Y%m%d", errors="coerce")
-    temp_df = temp_df.iloc[:, 1:]
-    data_se = temp_df.iloc[:, 1]
-    data_se.name = "RV"
-    temp_df = data_se.astype("float", errors="ignore")
-    temp_df.index.name = "date"
+    node = soup.find("p")
+    if node is None:
+        return _empty_article_rlab_rv()
+    try:
+        title_fore = (
+            pd.DataFrame(node.get_text().split(symbol)).iloc[0, 0].strip()
+        )
+        title_list = (
+            pd.DataFrame(node.get_text().split(symbol))
+            .iloc[1, 0]
+            .strip()
+            .split("\n")
+        )
+        title_list.insert(0, title_fore)
+        temp_df = pd.DataFrame(node.get_text().split(symbol)).iloc[2:, :]
+        temp_df = temp_df.iloc[:, 0].str.split(" ", expand=True)
+        temp_df = temp_df.iloc[:, 1:]
+        temp_df.iloc[:, -1] = temp_df.iloc[:, -1].str.replace(r"\n", "")
+        temp_df.reset_index(inplace=True)
+        temp_df.index = pd.to_datetime(
+            temp_df.iloc[:, 1], format="%Y%m%d", errors="coerce"
+        )
+        temp_df = temp_df.iloc[:, 1:]
+        data_se = temp_df.iloc[:, 1]
+        data_se.name = "RV"
+        temp_df = data_se.astype("float", errors="ignore")
+        temp_df.index.name = "date"
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+        return _empty_article_rlab_rv()
     return temp_df
 
 

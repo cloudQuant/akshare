@@ -56,7 +56,7 @@ def stock_gdfx_free_holding_statistics_em(
         "columns": "ALL",
         "source": "WEB",
         "client": "WEB",
-        "filter": f"""(HOLDNUM_CHANGE_TYPE="001")(END_DATE='{'-'.join([date[:4], date[4:6], date[6:]])}')""",
+        "filter": f"""(HOLDNUM_CHANGE_TYPE="001")(END_DATE='{"-".join([date[:4], date[4:6], date[6:]])}')""",
     }
     r = requests.get(url, params=params)
     data_json = r.json()
@@ -158,7 +158,7 @@ def stock_gdfx_holding_statistics_em(date: str = "20210930") -> pd.DataFrame:
         "columns": "ALL",
         "source": "WEB",
         "client": "WEB",
-        "filter": f"""(HOLDNUM_CHANGE_TYPE="001")(END_DATE='{'-'.join([date[:4], date[4:6], date[6:]])}')""",
+        "filter": f"""(HOLDNUM_CHANGE_TYPE="001")(END_DATE='{"-".join([date[:4], date[4:6], date[6:]])}')""",
     }
     r = requests.get(url, params=params)
     data_json = r.json()
@@ -298,6 +298,7 @@ def stock_gdfx_free_holding_change_em(date: str = "20210930") -> pd.DataFrame:
         "-",
         "-",
         "-",
+        "-",
     ]
     big_df = big_df[
         [
@@ -332,7 +333,9 @@ def stock_gdfx_free_holding_change_em(date: str = "20210930") -> pd.DataFrame:
     return big_df
 
 
-def stock_gdfx_holding_change_em(date: str = "20210930") -> pd.DataFrame:
+def stock_gdfx_holding_change_em(
+    date: str = "20210930", max_pages: int = None
+) -> pd.DataFrame:
     """
     东方财富网-数据中心-股东分析-股东持股变动统计-十大股东
     https://data.eastmoney.com/gdfx/HoldingAnalyse.html
@@ -353,56 +356,57 @@ def stock_gdfx_holding_change_em(date: str = "20210930") -> pd.DataFrame:
         "client": "WEB",
         "filter": f"(END_DATE='{'-'.join([date[:4], date[4:6], date[6:]])}')",
     }
-    r = requests.get(url, params=params)
+    output_columns = [
+        "序号",
+        "股东名称",
+        "股东类型",
+        "期末持股只数统计-总持有",
+        "期末持股只数统计-新进",
+        "期末持股只数统计-增加",
+        "期末持股只数统计-不变",
+        "期末持股只数统计-减少",
+        "流通市值统计",
+        "持有个股",
+    ]
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["result"]["pages"]
+    total_page = int((data_json.get("result") or {}).get("pages") or 0)
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pageNumber": page})
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        records = (data_json.get("result") or {}).get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
 
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.reset_index(inplace=True)
     big_df["index"] = big_df.index + 1
-    big_df.columns = [
-        "序号",
-        "-",
-        "-",
-        "股东名称",
-        "-",
-        "股东类型",
-        "-",
-        "-",
-        "-",
-        "期末持股只数统计-总持有",
-        "期末持股只数统计-新进",
-        "期末持股只数统计-增加",
-        "期末持股只数统计-减少",
-        "期末持股只数统计-不变",
-        "-",
-        "-",
-        "持有个股",
-        "流通市值统计",
-        "-",
-        "-",
-    ]
-    big_df = big_df[
-        [
-            "序号",
-            "股东名称",
-            "股东类型",
-            "期末持股只数统计-总持有",
-            "期末持股只数统计-新进",
-            "期末持股只数统计-增加",
-            "期末持股只数统计-不变",
-            "期末持股只数统计-减少",
-            "流通市值统计",
-            "持有个股",
-        ]
-    ]
+    big_df.rename(
+        columns={
+            "index": "序号",
+            "HOLDER_NAME": "股东名称",
+            "HOLDER_TYPE": "股东类型",
+            "HOLDER_NUM": "期末持股只数统计-总持有",
+            "HOLDADD_NUM": "期末持股只数统计-新进",
+            "HOLDUP_NUM": "期末持股只数统计-增加",
+            "HOLDUNCHANGED_NUM": "期末持股只数统计-不变",
+            "HOLDDOWN_NUM": "期末持股只数统计-减少",
+            "HOLDER_MARKET_CAP": "流通市值统计",
+            "SECURITY_INFO": "持有个股",
+        },
+        inplace=True,
+    )
+    big_df = big_df[output_columns]
     big_df["期末持股只数统计-总持有"] = pd.to_numeric(big_df["期末持股只数统计-总持有"])
     big_df["期末持股只数统计-新进"] = pd.to_numeric(big_df["期末持股只数统计-新进"])
     big_df["期末持股只数统计-增加"] = pd.to_numeric(big_df["期末持股只数统计-增加"])
@@ -524,7 +528,9 @@ def stock_gdfx_top_10_em(
     return temp_df
 
 
-def stock_gdfx_free_holding_detail_em(date: str = "20210930") -> pd.DataFrame:
+def stock_gdfx_free_holding_detail_em(
+    date: str = "20210930", max_pages: int = None
+) -> pd.DataFrame:
     """
     东方财富网-数据中心-股东分析-股东持股明细-十大流通股东
     https://data.eastmoney.com/gdfx/HoldingAnalyse.html
@@ -545,18 +551,41 @@ def stock_gdfx_free_holding_detail_em(date: str = "20210930") -> pd.DataFrame:
         "client": "WEB",
         "filter": f"(END_DATE='{'-'.join([date[:4], date[4:6], date[6:]])}')",
     }
-    r = requests.get(url, params=params)
+    output_columns = [
+        "序号",
+        "股东名称",
+        "股东类型",
+        "股票代码",
+        "股票简称",
+        "报告期",
+        "期末持股-数量",
+        "期末持股-数量变化",
+        "期末持股-数量变化比例",
+        "期末持股-持股变动",
+        "期末持股-流通市值",
+        "公告日",
+    ]
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["result"]["pages"]
+    total_page = int((data_json.get("result") or {}).get("pages") or 0)
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pageNumber": page})
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        records = (data_json.get("result") or {}).get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat([big_df, temp_df], ignore_index=True)
 
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.reset_index(inplace=True)
     big_df["index"] = big_df.index + 1
     big_df.rename(
@@ -581,22 +610,7 @@ def stock_gdfx_free_holding_detail_em(date: str = "20210930") -> pd.DataFrame:
         inplace=True,
     )
 
-    big_df = big_df[
-        [
-            "序号",
-            "股东名称",
-            "股东类型",
-            "股票代码",
-            "股票简称",
-            "报告期",
-            "期末持股-数量",
-            "期末持股-数量变化",
-            "期末持股-数量变化比例",
-            "期末持股-持股变动",
-            "期末持股-流通市值",
-            "公告日",
-        ]
-    ]
+    big_df = big_df[output_columns]
     big_df["报告期"] = pd.to_datetime(big_df["报告期"], errors="coerce").dt.date
     big_df["公告日"] = pd.to_datetime(big_df["公告日"], errors="coerce").dt.date
     big_df["期末持股-数量"] = pd.to_numeric(big_df["期末持股-数量"], errors="coerce")
@@ -613,7 +627,10 @@ def stock_gdfx_free_holding_detail_em(date: str = "20210930") -> pd.DataFrame:
 
 
 def stock_gdfx_holding_detail_em(
-    date: str = "20230331", indicator: str = "个人", symbol: str = "新进"
+    date: str = "20230331",
+    indicator: str = "个人",
+    symbol: str = "新进",
+    max_pages: int = None,
 ) -> pd.DataFrame:
     """
     东方财富网-数据中心-股东分析-股东持股明细-十大股东
@@ -640,20 +657,44 @@ def stock_gdfx_holding_detail_em(
         "columns": "ALL",
         "source": "WEB",
         "client": "WEB",
-        "filter": f"""(HOLDER_NEWTYPE="{indicator}")(HOLDNUM_CHANGE_NAME="{symbol}")(END_DATE='{'-'.join([date[:4], date[4:6], date[6:]])}')""",
+        "filter": f"""(HOLDER_NEWTYPE="{indicator}")(HOLDNUM_CHANGE_NAME="{symbol}")(END_DATE='{"-".join([date[:4], date[4:6], date[6:]])}')""",
     }
-    r = requests.get(url, params=params)
+    output_columns = [
+        "序号",
+        "股东名称",
+        "股东类型",
+        "股票代码",
+        "股票简称",
+        "报告期",
+        "期末持股-数量",
+        "期末持股-数量变化",
+        "期末持股-数量变化比例",
+        "期末持股-持股变动",
+        "期末持股-流通市值",
+        "公告日",
+        "股东排名",
+    ]
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["result"]["pages"]
+    total_page = int((data_json.get("result") or {}).get("pages") or 0)
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pageNumber": page})
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        records = (data_json.get("result") or {}).get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
 
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.reset_index(inplace=True)
     big_df["index"] = big_df.index + 1
     big_df.rename(
@@ -675,23 +716,7 @@ def stock_gdfx_holding_detail_em(
         inplace=True,
     )
 
-    big_df = big_df[
-        [
-            "序号",
-            "股东名称",
-            "股东类型",
-            "股票代码",
-            "股票简称",
-            "报告期",
-            "期末持股-数量",
-            "期末持股-数量变化",
-            "期末持股-数量变化比例",
-            "期末持股-持股变动",
-            "期末持股-流通市值",
-            "公告日",
-            "股东排名",
-        ]
-    ]
+    big_df = big_df[output_columns]
     big_df["报告期"] = pd.to_datetime(big_df["报告期"], errors="coerce").dt.date
     big_df["公告日"] = pd.to_datetime(big_df["公告日"], errors="coerce").dt.date
     big_df["期末持股-数量"] = pd.to_numeric(big_df["期末持股-数量"], errors="coerce")
@@ -806,12 +831,16 @@ def stock_gdfx_free_holding_analyse_em(date: str = "20230930") -> pd.DataFrame:
     return big_df
 
 
-def stock_gdfx_holding_analyse_em(date: str = "20230331") -> pd.DataFrame:
+def stock_gdfx_holding_analyse_em(
+    date: str = "20230331", max_pages: int | None = None
+) -> pd.DataFrame:
     """
     东方财富网-数据中心-股东分析-股东持股分析-十大股东
     https://data.eastmoney.com/gdfx/HoldingAnalyse.html
     :param date: 报告期
     :type date: str
+    :param max_pages: 最多抓取页数; 默认 None 表示抓取全部页
+    :type max_pages: int | None
     :return: 十大股东
     :rtype: pandas.DataFrame
     """
@@ -827,17 +856,28 @@ def stock_gdfx_holding_analyse_em(date: str = "20230331") -> pd.DataFrame:
         "client": "WEB",
         "filter": f"(END_DATE='{'-'.join([date[:4], date[4:6], date[6:]])}')",
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["result"]["pages"]
+    result = data_json.get("result") or {}
+    total_page = int(result.get("pages") or 0)
+    if total_page <= 0:
+        return pd.DataFrame()
+    if max_pages is not None:
+        total_page = min(total_page, max(1, int(max_pages)))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pageNumber": page})
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        temp_df = pd.DataFrame((data_json.get("result") or {}).get("data") or [])
+        if temp_df.empty:
+            continue
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+    if big_df.empty:
+        return pd.DataFrame()
 
     big_df.reset_index(inplace=True)
     big_df["index"] = big_df["index"] + 1
@@ -972,7 +1012,9 @@ def stock_gdfx_free_holding_teamwork_em(symbol: str = "社保") -> pd.DataFrame:
     return big_df
 
 
-def stock_gdfx_holding_teamwork_em(symbol: str = "社保") -> pd.DataFrame:
+def stock_gdfx_holding_teamwork_em(
+    symbol: str = "社保", max_pages: int = None
+) -> pd.DataFrame:
     """
     东方财富网-数据中心-股东分析-股东协同-十大股东
     https://data.eastmoney.com/gdfx/HoldingAnalyse.html
@@ -994,18 +1036,36 @@ def stock_gdfx_holding_teamwork_em(symbol: str = "社保") -> pd.DataFrame:
         "client": "WEB",
     }
     params.update(symbol_dict)
-    r = requests.get(url, params=params)
+    output_columns = [
+        "序号",
+        "股东名称",
+        "股东类型",
+        "协同股东名称",
+        "协同股东类型",
+        "协同次数",
+        "个股详情",
+    ]
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["result"]["pages"]
+    total_page = int((data_json.get("result") or {}).get("pages") or 0)
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"pageNumber": page})
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        records = (data_json.get("result") or {}).get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
 
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.reset_index(inplace=True)
     big_df["index"] = big_df.index + 1
     big_df.columns = [
@@ -1020,17 +1080,7 @@ def stock_gdfx_holding_teamwork_em(symbol: str = "社保") -> pd.DataFrame:
         "-",
         "个股详情",
     ]
-    big_df = big_df[
-        [
-            "序号",
-            "股东名称",
-            "股东类型",
-            "协同股东名称",
-            "协同股东类型",
-            "协同次数",
-            "个股详情",
-        ]
-    ]
+    big_df = big_df[output_columns]
     big_df["协同次数"] = pd.to_numeric(big_df["协同次数"], errors="coerce")
     return big_df
 

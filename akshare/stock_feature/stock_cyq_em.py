@@ -11,6 +11,7 @@ from datetime import datetime
 import pandas as pd
 import py_mini_racer
 import requests
+from akshare.utils.request import request_eastmoney
 
 
 def stock_cyq_em(symbol: str = "000001", adjust: str = "") -> pd.DataFrame:
@@ -24,6 +25,17 @@ def stock_cyq_em(symbol: str = "000001", adjust: str = "") -> pd.DataFrame:
     :return: 筹码分布
     :rtype: pandas.DataFrame
     """
+    output_columns = [
+        "日期",
+        "获利比例",
+        "平均成本",
+        "90成本-低",
+        "90成本-高",
+        "90集中度",
+        "70成本-低",
+        "70成本-高",
+        "70集中度",
+    ]
     html_str = """
     // @ts-nocheck
 
@@ -230,9 +242,12 @@ def stock_cyq_em(symbol: str = "000001", adjust: str = "") -> pd.DataFrame:
         "end": datetime.now().date().strftime("%Y%m%d"),
         "lmt": "210",
     }
-    r = requests.get(url, params=params)
+    r = request_eastmoney(url, params=params, timeout=15)
     data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
+    klines = (data_json.get("data") or {}).get("klines") or []
+    if not klines:
+        return pd.DataFrame(columns=output_columns)
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
     temp_df.columns = [
         "date",
         "open",
@@ -283,17 +298,7 @@ def stock_cyq_em(symbol: str = "000001", adjust: str = "") -> pd.DataFrame:
             pct_70_con,
         ]
     ).T
-    temp_df.columns = [
-        "日期",
-        "获利比例",
-        "平均成本",
-        "90成本-低",
-        "90成本-高",
-        "90集中度",
-        "70成本-低",
-        "70成本-高",
-        "70集中度",
-    ]
+    temp_df.columns = output_columns
     temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
     temp_df["获利比例"] = pd.to_numeric(temp_df["获利比例"], errors="coerce")
     temp_df["平均成本"] = pd.to_numeric(temp_df["平均成本"], errors="coerce")

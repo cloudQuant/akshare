@@ -9,6 +9,8 @@ https://quote.eastmoney.com/center/gridlist.html#hk_wellknown
 import pandas as pd
 import requests
 
+from akshare.utils.request import request_eastmoney
+
 
 def stock_hk_famous_spot_em() -> pd.DataFrame:
     """
@@ -33,9 +35,41 @@ def stock_hk_famous_spot_em() -> pd.DataFrame:
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,"
         "f25,f26,f22,f33,f11,f62,f128,f136,f115,f152",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"]["diff"]).T
+    try:
+        r = request_eastmoney(url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Eastmoney HK famous endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"Eastmoney HK famous endpoint returned HTTP {r.status_code}: {url}"
+        )
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Eastmoney HK famous endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
+    data = data_json.get("data") or {}
+    diff = data.get("diff") or []
+    if not diff:
+        return pd.DataFrame(
+            columns=[
+                "序号",
+                "代码",
+                "名称",
+                "最新价",
+                "涨跌额",
+                "涨跌幅",
+                "今开",
+                "最高",
+                "最低",
+                "昨收",
+                "成交量",
+                "成交额",
+            ]
+        )
+    temp_df = pd.DataFrame(diff).T
     temp_df.columns = [
         "_",
         "最新价",

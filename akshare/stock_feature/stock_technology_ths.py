@@ -6,6 +6,7 @@ Desc: 同花顺-数据中心-技术选股
 https://data.10jqka.com.cn/rank/cxg/
 """
 
+import re
 from io import StringIO
 
 import pandas as pd
@@ -52,7 +53,7 @@ def stock_rank_cxg_ths(symbol: str = "创月新高") -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = (
@@ -73,7 +74,7 @@ def stock_rank_cxg_ths(symbol: str = "创月新高") -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = (
@@ -81,7 +82,8 @@ def stock_rank_cxg_ths(symbol: str = "创月新高") -> pd.DataFrame:
             f"order/asc/page/{page}/ajax/1/free/1/"
         )
         r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text))[0]
+        html_fixed = re.sub(r'\srowspan="\d+"', '', r.text)
+        temp_df = pd.read_html(StringIO(html_fixed), header=0)[0]  # 20260214 新增
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :8]
     big_df.columns = [
@@ -129,7 +131,7 @@ def stock_rank_cxd_ths(symbol: str = "创月新低") -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = (
@@ -150,7 +152,7 @@ def stock_rank_cxd_ths(symbol: str = "创月新低") -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = (
@@ -158,7 +160,7 @@ def stock_rank_cxd_ths(symbol: str = "创月新低") -> pd.DataFrame:
             f"stockcode/order/asc/page/{page}/ajax/1/free/1/"
         )
         r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text))[0]
+        temp_df = pd.read_html(StringIO(r.text))[0].iloc[:, :-1]  # 20260214 新增
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :8]
     big_df.columns = [
@@ -198,7 +200,7 @@ def stock_rank_lxsz_ths() -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = "http://data.10jqka.com.cn/rank/lxsz/field/lxts/order/desc/page/1/ajax/1/free/1/"
@@ -216,7 +218,7 @@ def stock_rank_lxsz_ths() -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = f"http://data.10jqka.com.cn/rank/lxsz/field/lxts/order/desc/page/{page}/ajax/1/free/1/"
@@ -261,7 +263,7 @@ def stock_rank_lxxd_ths() -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = "http://data.10jqka.com.cn/rank/lxxd/field/lxts/order/desc/page/1/ajax/1/free/1/"
@@ -279,7 +281,7 @@ def stock_rank_lxxd_ths() -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = f"http://data.10jqka.com.cn/rank/lxxd/field/lxts/order/desc/page/{page}/ajax/1/free/1/"
@@ -324,7 +326,7 @@ def stock_rank_cxfl_ths() -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = "http://data.10jqka.com.cn/rank/cxfl/field/count/order/desc/ajax/1/free/1/page/1/free/1/"
@@ -342,12 +344,38 @@ def stock_rank_cxfl_ths() -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = f"http://data.10jqka.com.cn/rank/cxfl/field/count/order/desc/ajax/1/free/1/page/{page}/free/1/"
         r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text), converters={"股票代码": str})[0]
+        soup = BeautifulSoup(r.text, 'html.parser')
+        table = soup.find('table', class_='m-table J-ajax-table')
+        if not table:
+            print("未找到表格")
+            exit()
+
+        rows = table.find('tbody').find_all('tr')
+        data = []
+
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 10:  # 确保是数据行
+                item = {
+                    '序号': cols[0].text.strip(),
+                    '股票代码': cols[1].find('a').text.strip() if cols[1].find('a') else cols[1].text.strip(),
+                    '股票简称': cols[2].find('a').text.strip() if cols[2].find('a') else cols[2].text.strip(),
+                    '涨跌幅': cols[3].text.strip(),
+                    '最新价': cols[4].text.strip(),
+                    '成交量': cols[5].text.strip(),
+                    '基准日成交量': cols[6].text.strip(),
+                    '放量天数': cols[7].text.strip(),
+                    '阶段涨跌幅': cols[8].text.strip(),
+                    '所属行业': cols[9].find('a').text.strip() if cols[9].find('a') else cols[9].text.strip()
+                }
+                data.append(item)
+
+        temp_df = pd.DataFrame(data)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :10]
     big_df.columns = [
@@ -386,7 +414,7 @@ def stock_rank_cxsl_ths() -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = "http://data.10jqka.com.cn/rank/cxsl/field/count/order/desc/ajax/1/free/1/page/1/free/1/"
@@ -404,12 +432,38 @@ def stock_rank_cxsl_ths() -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = f"http://data.10jqka.com.cn/rank/cxsl/field/count/order/desc/ajax/1/free/1/page/{page}/free/1/"
         r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text), converters={"股票代码": str})[0]
+        soup = BeautifulSoup(r.text, 'html.parser')
+        table = soup.find('table', class_='m-table J-ajax-table')
+        if not table:
+            print("未找到表格")
+            exit()
+
+        rows = table.find('tbody').find_all('tr')
+        data = []
+
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 10:  # 确保是数据行
+                item = {
+                    '序号': cols[0].text.strip(),
+                    '股票代码': cols[1].find('a').text.strip() if cols[1].find('a') else cols[1].text.strip(),
+                    '股票简称': cols[2].find('a').text.strip() if cols[2].find('a') else cols[2].text.strip(),
+                    '涨跌幅': cols[3].text.strip(),
+                    '最新价': cols[4].text.strip(),
+                    '成交量': cols[5].text.strip(),
+                    '基准日成交量': cols[6].text.strip(),
+                    '放量天数': cols[7].text.strip(),
+                    '阶段涨跌幅': cols[8].text.strip(),
+                    '所属行业': cols[9].find('a').text.strip() if cols[9].find('a') else cols[9].text.strip()
+                }
+                data.append(item)
+
+        temp_df = pd.DataFrame(data)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :10]
     big_df.columns = [
@@ -438,7 +492,7 @@ def stock_rank_cxsl_ths() -> pd.DataFrame:
 def stock_rank_xstp_ths(symbol: str = "500日均线") -> pd.DataFrame:
     """
     同花顺-数据中心-技术选股-向上突破
-    http://data.10jqka.com.cn/rank/xstp/
+    https://data.10jqka.com.cn/rank/xstp/
     :param symbol: choice of {"5日均线", "10日均线", "20日均线", "30日均线", "60日均线", "90日均线", "250日均线", "500日均线"}
     :type symbol: str
     :return: 向上突破
@@ -460,7 +514,7 @@ def stock_rank_xstp_ths(symbol: str = "500日均线") -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = f"http://data.10jqka.com.cn/rank/xstp/board/{symbol_map[symbol]}/order/asc/ajax/1/free/1/page/1/free/1/"
@@ -478,7 +532,7 @@ def stock_rank_xstp_ths(symbol: str = "500日均线") -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = (
@@ -486,7 +540,32 @@ def stock_rank_xstp_ths(symbol: str = "500日均线") -> pd.DataFrame:
             f"asc/ajax/1/free/1/page/{page}/free/1/"
         )
         r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text), converters={"股票代码": str})[0]
+        pd.read_html(StringIO(r.text))
+        soup = BeautifulSoup(r.text, 'html.parser')
+        table = soup.find('table', class_='m-table J-ajax-table')
+        if not table:
+            print("未找到表格")
+            exit()
+
+        rows = table.find('tbody').find_all('tr')
+        data = []
+
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 8:  # 确保是数据行
+                item = {
+                    '序号': cols[0].text.strip(),
+                    '股票代码': cols[1].find('a').text.strip() if cols[1].find('a') else cols[1].text.strip(),
+                    '股票简称': cols[2].find('a').text.strip() if cols[2].find('a') else cols[2].text.strip(),
+                    '最新价': cols[3].text.strip(),
+                    '成交额': cols[4].text.strip(),
+                    '成交量': cols[5].text.strip(),
+                    '涨跌幅': cols[6].text.strip(),
+                    '换手率': cols[7].text.strip(),
+                }
+                data.append(item)
+
+        temp_df = pd.DataFrame(data)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :8]
     big_df.columns = [
@@ -534,7 +613,7 @@ def stock_rank_xxtp_ths(symbol: str = "500日均线") -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = f"http://data.10jqka.com.cn/rank/xxtp/board/{symbol_map[symbol]}/order/asc/ajax/1/free/1/page/1/free/1/"
@@ -552,7 +631,7 @@ def stock_rank_xxtp_ths(symbol: str = "500日均线") -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = (
@@ -560,7 +639,31 @@ def stock_rank_xxtp_ths(symbol: str = "500日均线") -> pd.DataFrame:
             f"asc/ajax/1/free/1/page/{page}/free/1/"
         )
         r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text), converters={"股票代码": str})[0]
+        soup = BeautifulSoup(r.text, 'html.parser')
+        table = soup.find('table', class_='m-table J-ajax-table')
+        if not table:
+            print("未找到表格")
+            exit()
+
+        rows = table.find('tbody').find_all('tr')
+        data = []
+
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 8:  # 确保是数据行
+                item = {
+                    '序号': cols[0].text.strip(),
+                    '股票代码': cols[1].find('a').text.strip() if cols[1].find('a') else cols[1].text.strip(),
+                    '股票简称': cols[2].find('a').text.strip() if cols[2].find('a') else cols[2].text.strip(),
+                    '最新价': cols[3].text.strip(),
+                    '成交额': cols[4].text.strip(),
+                    '成交量': cols[5].text.strip(),
+                    '涨跌幅': cols[6].text.strip(),
+                    '换手率': cols[7].text.strip(),
+                }
+                data.append(item)
+
+        temp_df = pd.DataFrame(data)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :8]
     big_df.columns = [
@@ -596,7 +699,7 @@ def stock_rank_ljqs_ths() -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = "http://data.10jqka.com.cn/rank/ljqs/field/count/order/desc/ajax/1/free/1/page/1/free/1/"
@@ -614,12 +717,36 @@ def stock_rank_ljqs_ths() -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = f"http://data.10jqka.com.cn/rank/ljqs/field/count/order/desc/ajax/1/free/1/page/{page}/free/1/"
         r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text), converters={"股票代码": str})[0]
+        soup = BeautifulSoup(r.text, 'html.parser')
+        table = soup.find('table', class_='m-table J-ajax-table')
+        if not table:
+            print("未找到表格")
+            exit()
+
+        rows = table.find('tbody').find_all('tr')
+        data = []
+
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 8:  # 确保是数据行
+                item = {
+                    '序号': cols[0].text.strip(),
+                    '股票代码': cols[1].find('a').text.strip() if cols[1].find('a') else cols[1].text.strip(),
+                    '股票简称': cols[2].find('a').text.strip() if cols[2].find('a') else cols[2].text.strip(),
+                    '最新价': cols[3].text.strip(),
+                    '量价齐升天数': cols[4].text.strip(),
+                    '阶段涨幅': cols[5].text.strip(),
+                    '累计换手率': cols[6].text.strip(),
+                    '所属行业': cols[7].find('a').text.strip() if cols[7].find('a') else cols[7].text.strip()
+                }
+                data.append(item)
+
+        temp_df = pd.DataFrame(data)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :8]
     big_df.columns = [
@@ -656,7 +783,7 @@ def stock_rank_ljqd_ths() -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = "http://data.10jqka.com.cn/rank/ljqd/field/count/order/desc/ajax/1/free/1/page/1/free/1/"
@@ -674,12 +801,36 @@ def stock_rank_ljqd_ths() -> pd.DataFrame:
         v_code = js_code.call("v")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                          "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
         }
         url = f"http://data.10jqka.com.cn/rank/ljqd/field/count/order/desc/ajax/1/free/1/page/{page}/free/1/"
         r = requests.get(url, headers=headers)
-        temp_df = pd.read_html(StringIO(r.text), converters={"股票代码": str})[0]
+        soup = BeautifulSoup(r.text, 'html.parser')
+        table = soup.find('table', class_='m-table J-ajax-table')
+        if not table:
+            print("未找到表格")
+            exit()
+
+        rows = table.find('tbody').find_all('tr')
+        data = []
+
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 8:  # 确保是数据行
+                item = {
+                    '序号': cols[0].text.strip(),
+                    '股票代码': cols[1].find('a').text.strip() if cols[1].find('a') else cols[1].text.strip(),
+                    '股票简称': cols[2].find('a').text.strip() if cols[2].find('a') else cols[2].text.strip(),
+                    '最新价': cols[3].text.strip(),
+                    '量价齐跌天数': cols[4].text.strip(),
+                    '阶段涨幅': cols[5].text.strip(),
+                    '累计换手率': cols[6].text.strip(),
+                    '所属行业': cols[7].find('a').text.strip() if cols[7].find('a') else cols[7].text.strip()
+                }
+                data.append(item)
+
+        temp_df = pd.DataFrame(data)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :8]
     big_df.columns = [
@@ -717,12 +868,41 @@ def stock_rank_xzjp_ths() -> pd.DataFrame:
     v_code = js_code.call("v")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
         "Cookie": f"v={v_code}",
     }
     url = "http://data.10jqka.com.cn/ajax/xzjp/field/DECLAREDATE/order/desc/ajax/1/free/1/"
     r = requests.get(url, headers=headers)
-    temp_df = pd.read_html(StringIO(r.text), converters={"股票代码": str})[0]
+    soup = BeautifulSoup(r.text, 'html.parser')
+    table = soup.find('table', class_='m-table J-ajax-table')
+    if not table:
+        print("未找到表格")
+        exit()
+
+    rows = table.find('tbody').find_all('tr')
+    data = []
+
+    for row in rows:
+        cols = row.find_all('td')
+        if len(cols) >= 8:  # 确保是数据行
+            item = {
+                '序号': cols[0].text.strip(),
+                '举牌公告日': cols[1].find('a').text.strip() if cols[1].find('a') else cols[1].text.strip(),
+                '股票代码': cols[2].find('a').text.strip() if cols[2].find('a') else cols[2].text.strip(),
+                '股票简称': cols[3].text.strip(),
+                '现价': cols[4].text.strip(),
+                '涨跌幅': cols[5].text.strip(),
+                '举牌方': cols[6].text.strip(),
+                '增持数量': cols[7].find('a').text.strip() if cols[7].find('a') else cols[7].text.strip(),
+                '交易均价': cols[8].find('a').text.strip() if cols[8].find('a') else cols[8].text.strip(),
+                '增持数量占总股本比例': cols[9].find('a').text.strip() if cols[9].find('a') else cols[9].text.strip(),
+                '变动后持股总数': cols[10].find('a').text.strip() if cols[10].find('a') else cols[10].text.strip(),
+                '变动后持股比例': cols[11].find('a').text.strip() if cols[11].find('a') else cols[11].text.strip(),
+                '历史数据': cols[12].find('a').text.strip() if cols[12].find('a') else cols[12].text.strip(),
+            }
+            data.append(item)
+
+    temp_df = pd.DataFrame(data)
     big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     big_df = big_df.iloc[:, :13]
     big_df.columns = [
@@ -796,10 +976,10 @@ if __name__ == "__main__":
     stock_rank_cxsl_ths_df = stock_rank_cxsl_ths()
     print(stock_rank_cxsl_ths_df)
 
-    stock_rank_xstp_ths_df = stock_rank_xstp_ths(symbol="500日均线")
+    stock_rank_xstp_ths_df = stock_rank_xstp_ths(symbol="5日均线")
     print(stock_rank_xstp_ths_df)
 
-    stock_rank_xxtp_ths_df = stock_rank_xxtp_ths(symbol="500日均线")
+    stock_rank_xxtp_ths_df = stock_rank_xxtp_ths(symbol="5日均线")
     print(stock_rank_xxtp_ths_df)
 
     stock_rank_ljqs_ths_df = stock_rank_ljqs_ths()

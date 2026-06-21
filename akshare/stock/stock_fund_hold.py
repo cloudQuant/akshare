@@ -11,7 +11,9 @@ import requests
 
 
 def stock_report_fund_hold(
-    symbol: str = "基金持仓", date: str = "20210331"
+    symbol: str = "基金持仓",
+    date: str = "20210331",
+    max_pages: int = None,
 ) -> pd.DataFrame:
     """
     东方财富网-数据中心-主力数据-基金持仓
@@ -44,9 +46,12 @@ def stock_report_fund_hold(
         "p": "1",
         "pageNo": "1",
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = data_json["pages"]
+    total_page = int(data_json.get("pages") or 0)
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     for page in range(1, total_page + 1):
         params = {
@@ -60,10 +65,27 @@ def stock_report_fund_hold(
             "p": page,
             "pageNo": page,
         }
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["data"])
+        records = data_json.get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat([big_df, temp_df], ignore_index=True)
+    output_columns = [
+        "序号",
+        "股票代码",
+        "股票简称",
+        "持有基金家数",
+        "持股总数",
+        "持股市值",
+        "持股变化",
+        "持股变动数值",
+        "持股变动比例",
+    ]
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.reset_index(inplace=True)
     big_df["index"] = list(range(1, len(big_df) + 1))
     big_df.columns = [
@@ -91,19 +113,7 @@ def stock_report_fund_hold(
         "_",
         "_",
     ]
-    big_df = big_df[
-        [
-            "序号",
-            "股票代码",
-            "股票简称",
-            "持有基金家数",
-            "持股总数",
-            "持股市值",
-            "持股变化",
-            "持股变动数值",
-            "持股变动比例",
-        ]
-    ]
+    big_df = big_df[output_columns]
     return big_df
 
 

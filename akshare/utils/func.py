@@ -5,7 +5,9 @@ Desc: 通用帮助函数
 """
 
 import math
+import random
 import ssl
+import time
 from typing import List, Dict
 
 import pandas as pd
@@ -14,6 +16,7 @@ import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.ssl_ import create_urllib3_context
 
+from akshare.utils.request import eastmoney_fallback_urls, request_eastmoney
 from akshare.utils.tqdm import get_tqdm
 
 # 禁用SSL警告
@@ -40,6 +43,27 @@ def _get_ssl_session():
     return session
 
 
+def _request_with_ssl_fallback(url: str, params: Dict, timeout: int):
+    try:
+        return request_eastmoney(url, params=params, timeout=timeout)
+    except (requests.RequestException, ValueError):
+        session = _get_ssl_session()
+        last_exception = None
+        for candidate_url in eastmoney_fallback_urls(url):
+            try:
+                return session.get(
+                    candidate_url,
+                    params=params,
+                    timeout=timeout,
+                    verify=False,
+                )
+            except requests.RequestException as exc:
+                last_exception = exc
+        raise RuntimeError(
+            f"Eastmoney paginated endpoint request failed: {url}"
+        ) from last_exception
+
+
 def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
     """
     东方财富-分页获取数据并合并结果
@@ -56,24 +80,49 @@ def fetch_paginated_data(url: str, base_params: Dict, timeout: int = 15):
     # 复制参数以避免修改原始参数
     params = base_params.copy()
     # 获取第一页数据，用于确定分页信息
-    session = _get_ssl_session()
-    r = session.get(url, params=params, timeout=timeout, verify=False)
-    data_json = r.json()
+    r = _request_with_ssl_fallback(url, params=params, timeout=timeout)
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"Eastmoney paginated endpoint returned HTTP {r.status_code}: {url}"
+        )
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Eastmoney paginated endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
+    data = data_json.get("data") or {}
+    diff = data.get("diff") or []
+    if not diff:
+        return pd.DataFrame()
     # 计算分页信息
-    per_page_num = len(data_json["data"]["diff"])
-    total_page = math.ceil(data_json["data"]["total"] / per_page_num)
+    per_page_num = len(diff)
+    total_page = math.ceil(data.get("total", 0) / per_page_num)
     # 存储所有页面数据
     temp_list = []
     # 添加第一页数据
-    temp_list.append(pd.DataFrame(data_json["data"]["diff"]))
+    temp_list.append(pd.DataFrame(diff))
     # 获取进度条
     tqdm = get_tqdm()
     # 获取剩余页面数据
     for page in tqdm(range(2, total_page + 1), leave=False):
         params.update({"pn": page})
-        r = session.get(url, params=params, timeout=timeout, verify=False)
-        data_json = r.json()
-        inner_temp_df = pd.DataFrame(data_json["data"]["diff"])
+        # 添加随机延迟，避免请求过于频繁
+        time.sleep(random.uniform(0.5, 1.5))
+        r = _request_with_ssl_fallback(url, params=params, timeout=timeout)
+        if r.status_code != 200:
+            raise RuntimeError(
+                f"Eastmoney paginated endpoint returned HTTP {r.status_code}: {url}"
+            )
+        try:
+            data_json = r.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Eastmoney paginated endpoint returned non-JSON response: {url}; "
+                f"preview={r.text[:120]!r}"
+            ) from exc
+        inner_temp_df = pd.DataFrame((data_json.get("data") or {}).get("diff") or [])
         temp_list.append(inner_temp_df)
     # 合并所有数据
     temp_df = pd.concat(temp_list, ignore_index=True)

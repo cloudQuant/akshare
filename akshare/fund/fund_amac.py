@@ -6,6 +6,8 @@ Desc: 中国证券投资基金业协会-信息公示数据
 中国证券投资基金业协会-新版: https://gs.amac.org.cn
 """
 
+import time
+
 import pandas as pd
 import requests
 
@@ -18,14 +20,175 @@ headers = {
 }
 
 
+_AMAC_FUND_ABS_COLUMNS = [
+    "编号",
+    "备案编号",
+    "专项计划全称",
+    "管理人",
+    "托管人",
+    "成立日期",
+    "预期到期时间",
+    "备案通过时间",
+]
+
+_AMAC_MEMBER_INFO_COLUMNS = [
+    "机构（会员）名称",
+    "会员代表",
+    "会员类型",
+    "会员编号",
+    "入会时间",
+    "机构类型",
+    "是否星标",
+]
+
+_AMAC_FUND_SUB_INFO_COLUMNS = [
+    "产品编码",
+    "产品名称",
+    "私募基金管理人名称",
+    "托管人名称",
+    "成立日期",
+    "备案日期",
+]
+
+_AMAC_AOIN_INFO_COLUMNS = [
+    "产品编码",
+    "产品名称",
+    "直投子公司",
+    "管理机构",
+    "设立日期",
+]
+
+_AMAC_MEMBER_SUB_INFO_COLUMNS = [
+    "机构（会员）名称",
+    "会员代表",
+    "会员类型",
+    "会员编号",
+    "入会时间",
+    "公司类型",
+]
+
+_AMAC_MANAGER_CANCELLED_INFO_COLUMNS = [
+    "管理人名称",
+    "统一社会信用代码",
+    "登记时间",
+    "注销时间",
+    "注销类型",
+]
+
+_AMAC_FUND_ACCOUNT_INFO_COLUMNS = [
+    "成立日期",
+    "产品编码",
+    "产品名称",
+    "管理人名称",
+]
+
+_AMAC_FUND_INFO_COLUMNS = [
+    "基金名称",
+    "私募基金管理人名称",
+    "私募基金管理人类型",
+    "运行状态",
+    "备案时间",
+    "建立时间",
+    "托管人名称",
+]
+
+_AMAC_FUTURES_INFO_COLUMNS = [
+    "产品名称",
+    "产品编码",
+    "管理人名称",
+    "托管人名称",
+    "成立日期",
+    "投资类型",
+    "是否分级",
+    "备案日期",
+    "到期日",
+    "运作状态",
+]
+
+
+def _empty_amac_fund_abs() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_FUND_ABS_COLUMNS)
+
+
+def _empty_amac_member_info() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_MEMBER_INFO_COLUMNS)
+
+
+def _empty_amac_fund_sub_info() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_FUND_SUB_INFO_COLUMNS)
+
+
+def _empty_amac_aoin_info() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_AOIN_INFO_COLUMNS)
+
+
+def _empty_amac_member_sub_info() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_MEMBER_SUB_INFO_COLUMNS)
+
+
+def _empty_amac_manager_cancelled_info() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_MANAGER_CANCELLED_INFO_COLUMNS)
+
+
+def _empty_amac_fund_account_info() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_FUND_ACCOUNT_INFO_COLUMNS)
+
+
+def _empty_amac_fund_info() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_FUND_INFO_COLUMNS)
+
+
+def _empty_amac_futures_info() -> pd.DataFrame:
+    return pd.DataFrame(columns=_AMAC_FUTURES_INFO_COLUMNS)
+
+
+def _enable_legacy_server_connect(context):
+    import ssl
+
+    legacy_option = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0x4)
+    context.options |= legacy_option
+    return context
+
+
+def _post_json(url: str, **kwargs):
+    kwargs.setdefault("timeout", 15)
+    session = kwargs.pop("session", requests)
+    retry_statuses = {429, 502, 503, 504}
+    max_retries = kwargs.pop("max_retries", 3)
+    retry_delay = kwargs.pop("retry_delay", 1.0)
+    res = None
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            res = session.post(url, **kwargs)
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                time.sleep(retry_delay * (2**attempt))
+                continue
+            raise RuntimeError(f"AMAC endpoint request failed: {url}") from exc
+        if res.status_code == 200 or res.status_code not in retry_statuses:
+            break
+        if attempt < max_retries:
+            time.sleep(retry_delay * (2**attempt))
+    if res is None:
+        raise RuntimeError(f"AMAC endpoint request failed: {url}") from last_exc
+    if res.status_code != 200:
+        raise RuntimeError(f"AMAC endpoint returned HTTP {res.status_code}: {url}")
+    try:
+        return res.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"AMAC endpoint returned non-JSON response: {url}; preview={res.text[:120]!r}"
+        ) from exc
+
+
 def _get_pages(url: str = "", payload: str = "") -> pd.DataFrame:
     """
     中国证券投资基金业协会-信息公示-私募基金管理人公示 页数
     暂时不使用本函数, 直接可以获取所有数据
     """
-    res = requests.post(url=url, json=payload, headers=headers)
-    res.encoding = "utf-8"
-    json_df = res.json()
+    json_df = _post_json(url=url, json=payload, headers=headers)
     return json_df["totalPages"]
 
 
@@ -33,15 +196,12 @@ def get_data(url: str = "", payload: str = "") -> pd.DataFrame:
     """
     中国证券投资基金业协会-信息公示-私募基金管理人公示
     """
-    res = requests.post(url=url, json=payload, headers=headers)
-    res.encoding = "utf-8"
-    json_df = res.json()
-    return json_df
+    return _post_json(url=url, json=payload, headers=headers)
 
 
 # 中国证券投资基金业协会-信息公示-会员信息
 # 中国证券投资基金业协会-信息公示-会员信息-会员机构综合查询
-def amac_member_info() -> pd.DataFrame:
+def amac_member_info(start_page: str = "1", end_page: str | None = None) -> pd.DataFrame:
     """
     中国证券投资基金业协会-信息公示-会员信息-会员机构综合查询
     https://gs.amac.org.cn/amac-infodisc/res/pof/member/index.html
@@ -54,16 +214,21 @@ def amac_member_info() -> pd.DataFrame:
         "page": "1",
         "size": "20",
     }
-    r = requests.post(url, params=params, json={}, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    try:
+        data_json = _post_json(url, params=params, json={}, headers=headers)
+        total_page = int(data_json["totalPages"])
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_member_info()
+    real_end_page = min(total_page, int(end_page)) if end_page is not None else total_page
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(int(start_page) - 1, real_end_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, headers=headers)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_member_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "managerName",
@@ -75,16 +240,13 @@ def amac_member_info() -> pd.DataFrame:
         "markStar",
     ]  # 定义要取的 value 的 keys
     manager_data_out = pd.DataFrame(big_df)
-    manager_data_out = manager_data_out[keys_list]
-    manager_data_out.columns = [
-        "机构（会员）名称",
-        "会员代表",
-        "会员类型",
-        "会员编号",
-        "入会时间",
-        "机构类型",
-        "是否星标",
-    ]
+    if manager_data_out.empty:
+        return _empty_amac_member_info()
+    try:
+        manager_data_out = manager_data_out[keys_list]
+    except KeyError:
+        return _empty_amac_member_info()
+    manager_data_out.columns = _AMAC_MEMBER_INFO_COLUMNS
     manager_data_out["入会时间"] = pd.to_datetime(
         manager_data_out["入会时间"], unit="ms"
     ).dt.date
@@ -139,26 +301,24 @@ def amac_person_fund_org_list(symbol: str = "公募基金管理公司") -> pd.Da
         "page": "1",
         "size": "20",
     }
-    r = requests.post(
+    data_json = _post_json(
         url,
         params=params,
         json={"orgType": symbol_map[symbol], "page": "1"},
         headers=headers,
     )
-    data_json = r.json()
     total_page = data_json["totalPages"]
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(0, int(total_page)), leave=False):
         params.update({"page": page})
-        r = requests.post(
+        data_json = _post_json(
             url,
             params=params,
             json={"orgType": symbol_map[symbol], "page": "1"},
             verify=False,
             headers=headers,
         )
-        data_json = r.json()
         temp_df = pd.DataFrame(data_json["content"])
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
@@ -205,14 +365,28 @@ def amac_person_bond_org_list() -> pd.DataFrame:
     import urllib3
     import ssl
 
-    ctx = ssl.create_default_context()
-    ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+    ctx = _enable_legacy_server_connect(ssl.create_default_context())
     # 使用自定义的 SSL 上下文发起 HTTPS 请求
     http = urllib3.PoolManager(ssl_context=ctx)
 
     url = "https://human.amac.org.cn/web/api/publicityAddress?rand=0.6288001872566391&pageNum=1&pageSize=5000"
-    r = http.request(method="GET", url=url)
-    data_json = r.json()
+    try:
+        r = http.request(
+            method="GET",
+            url=url,
+            timeout=urllib3.Timeout(connect=5, read=15),
+        )
+    except urllib3.exceptions.HTTPError as exc:
+        raise RuntimeError(f"AMAC endpoint request failed: {url}") from exc
+    if r.status != 200:
+        raise RuntimeError(f"AMAC endpoint returned HTTP {r.status}: {url}")
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        preview = r.data[:120].decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"AMAC endpoint returned non-JSON response: {url}; preview={preview!r}"
+        ) from exc
     temp_df = pd.DataFrame(data_json["list"])
     temp_df.reset_index(inplace=True)
     temp_df["index"] = range(1, len(temp_df) + 1)
@@ -237,7 +411,7 @@ def amac_person_bond_org_list() -> pd.DataFrame:
 
 # 中国证券投资基金业协会-信息公示-私募基金管理人公示
 # 中国证券投资基金业协会-信息公示-私募基金管理人公示-私募基金管理人综合查询
-def amac_manager_info() -> pd.DataFrame:
+def amac_manager_info(start_page: str = "1", end_page: str | None = None) -> pd.DataFrame:
     """
     中国证券投资基金业协会-信息公示-私募基金管理人公示-私募基金管理人综合查询
     https://gs.amac.org.cn/amac-infodisc/res/pof/manager/index.html
@@ -250,15 +424,14 @@ def amac_manager_info() -> pd.DataFrame:
         "page": "1",
         "size": "100",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
+    total_page = int(data_json["totalPages"])
+    real_end_page = min(total_page, int(end_page)) if end_page is not None else total_page
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(int(start_page) - 1, real_end_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
+        data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
         temp_df = pd.DataFrame(data_json["content"])
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
@@ -291,7 +464,9 @@ def amac_manager_info() -> pd.DataFrame:
 
 
 # 中国证券投资基金业协会-信息公示-私募基金管理人公示-私募基金管理人分类公示
-def amac_manager_classify_info() -> pd.DataFrame:
+def amac_manager_classify_info(
+    start_page: str = "1", end_page: str | None = None
+) -> pd.DataFrame:
     """
     中国证券投资基金业协会-信息公示-私募基金管理人公示-私募基金管理人分类公示
     https://gs.amac.org.cn/amac-infodisc/res/pof/manager/managerList.html
@@ -304,15 +479,14 @@ def amac_manager_classify_info() -> pd.DataFrame:
         "page": "1",
         "size": "100",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
+    total_page = int(data_json["totalPages"])
+    real_end_page = min(total_page, int(end_page)) if end_page is not None else total_page
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(int(start_page) - 1, real_end_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
+        data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
         temp_df = pd.DataFrame(data_json["content"])
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
@@ -373,18 +547,31 @@ def amac_member_sub_info() -> pd.DataFrame:
     params = {
         "rand": "0.7665138514630696",
         "page": "1",
-        "size": "100",
+        "size": "20",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    session = requests.Session()
+    request_kwargs = {
+        "verify": False,
+        "headers": headers,
+        "session": session,
+        "timeout": 8,
+        "max_retries": 1,
+        "retry_delay": 0.2,
+    }
+    try:
+        data_json = _post_json(url, params=params, json={}, **request_kwargs)
+        total_page = int(data_json["totalPages"])
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_member_sub_info()
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(0, total_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, **request_kwargs)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_member_sub_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "managerName",
@@ -395,15 +582,13 @@ def amac_member_sub_info() -> pd.DataFrame:
         "primaryInvestType",
     ]  # 定义要取的 value 的 keys
     manager_data_out = pd.DataFrame(big_df)
-    manager_data_out = manager_data_out[keys_list]
-    manager_data_out.columns = [
-        "机构（会员）名称",
-        "会员代表",
-        "会员类型",
-        "会员编号",
-        "入会时间",
-        "公司类型",
-    ]
+    if manager_data_out.empty:
+        return _empty_amac_member_sub_info()
+    try:
+        manager_data_out = manager_data_out[keys_list]
+    except KeyError:
+        return _empty_amac_member_sub_info()
+    manager_data_out.columns = _AMAC_MEMBER_SUB_INFO_COLUMNS
     manager_data_out["入会时间"] = pd.to_datetime(
         manager_data_out["入会时间"], unit="ms"
     ).dt.date
@@ -412,13 +597,13 @@ def amac_member_sub_info() -> pd.DataFrame:
 
 # 中国证券投资基金业协会-信息公示-基金产品
 # 中国证券投资基金业协会-信息公示-基金产品-私募基金管理人基金产品
-def amac_fund_info(start_page: str = "1", end_page: str = "2000") -> pd.DataFrame:
+def amac_fund_info(start_page: str = "1", end_page: str | None = None) -> pd.DataFrame:
     """
     中国证券投资基金业协会-信息公示-基金产品-私募基金管理人基金产品
     https://gs.amac.org.cn/amac-infodisc/res/pof/fund/index.html
     :param start_page: 开始页码, 获取指定页码直接的数据
     :type start_page: str
-    :param end_page: 结束页码, 获取指定页码直接的数据
+    :param end_page: 结束页码, 获取指定页码之前的数据; 默认为接口返回的全部页
     :type end_page: str
     :return: 私募基金管理人基金产品
     :rtype: pandas.DataFrame
@@ -429,20 +614,30 @@ def amac_fund_info(start_page: str = "1", end_page: str = "2000") -> pd.DataFram
         "page": "1",
         "size": "100",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = int(data_json["totalPages"])
-    if total_page > int(end_page):
-        real_end_page = int(end_page)
-    else:
-        real_end_page = total_page
+    session = requests.Session()
+    request_kwargs = {
+        "verify": False,
+        "headers": headers,
+        "session": session,
+        "timeout": 8,
+        "max_retries": 1,
+        "retry_delay": 0.2,
+    }
+    try:
+        data_json = _post_json(url, params=params, json={}, **request_kwargs)
+        total_page = int(data_json["totalPages"])
+        real_end_page = min(total_page, int(end_page)) if end_page else total_page
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_fund_info()
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(int(start_page) - 1, real_end_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, **request_kwargs)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_fund_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "fundName",
@@ -453,16 +648,13 @@ def amac_fund_info(start_page: str = "1", end_page: str = "2000") -> pd.DataFram
         "establishDate",
         "mandatorName",
     ]  # 定义要取的 value 的 keys
-    manager_data_out = big_df[keys_list].copy()
-    manager_data_out.columns = [
-        "基金名称",
-        "私募基金管理人名称",
-        "私募基金管理人类型",
-        "运行状态",
-        "备案时间",
-        "建立时间",
-        "托管人名称",
-    ]
+    if big_df.empty:
+        return _empty_amac_fund_info()
+    try:
+        manager_data_out = big_df[keys_list].copy()
+    except KeyError:
+        return _empty_amac_fund_info()
+    manager_data_out.columns = _AMAC_FUND_INFO_COLUMNS
     manager_data_out["建立时间"] = pd.to_datetime(
         manager_data_out["建立时间"], unit="ms"
     ).dt.date
@@ -484,18 +676,22 @@ def amac_securities_info() -> pd.DataFrame:
     params = {
         "rand": "0.7665138514630696",
         "page": "1",
-        "size": "100",
+        "size": "20",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    try:
+        data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
+        total_page = int(data_json["totalPages"])
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_fund_sub_info()
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(0, total_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_fund_sub_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "cpmc",
@@ -538,18 +734,22 @@ def amac_aoin_info() -> pd.DataFrame:
     params = {
         "rand": "0.7665138514630696",
         "page": "1",
-        "size": "100",
+        "size": "20",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    try:
+        data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
+        total_page = int(data_json["totalPages"])
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_aoin_info()
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(0, total_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_aoin_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "code",
@@ -559,14 +759,13 @@ def amac_aoin_info() -> pd.DataFrame:
         "createDate",
     ]  # 定义要取的 value 的 keys
     manager_data_out = pd.DataFrame(big_df)
-    manager_data_out = manager_data_out[keys_list]
-    manager_data_out.columns = [
-        "产品编码",
-        "产品名称",
-        "直投子公司",
-        "管理机构",
-        "设立日期",
-    ]
+    if manager_data_out.empty:
+        return _empty_amac_aoin_info()
+    try:
+        manager_data_out = manager_data_out[keys_list]
+    except KeyError:
+        return _empty_amac_aoin_info()
+    manager_data_out.columns = _AMAC_AOIN_INFO_COLUMNS
     manager_data_out["设立日期"] = pd.to_datetime(
         manager_data_out["设立日期"], unit="ms"
     ).dt.date
@@ -585,18 +784,22 @@ def amac_fund_sub_info() -> pd.DataFrame:
     params = {
         "rand": "0.7665138514630696",
         "page": "1",
-        "size": "100",
+        "size": "20",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    try:
+        data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
+        total_page = int(data_json["totalPages"])
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_fund_sub_info()
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(0, total_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, verify=False, headers=headers)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_fund_sub_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "productCode",
@@ -607,15 +810,13 @@ def amac_fund_sub_info() -> pd.DataFrame:
         "registeredDate",
     ]  # 定义要取的 value 的 keys
     manager_data_out = pd.DataFrame(big_df)
-    manager_data_out = manager_data_out[keys_list]
-    manager_data_out.columns = [
-        "产品编码",
-        "产品名称",
-        "私募基金管理人名称",
-        "托管人名称",
-        "成立日期",
-        "备案日期",
-    ]
+    if manager_data_out.empty:
+        return _empty_amac_fund_sub_info()
+    try:
+        manager_data_out = manager_data_out[keys_list]
+    except KeyError:
+        return _empty_amac_fund_sub_info()
+    manager_data_out.columns = _AMAC_FUND_SUB_INFO_COLUMNS
     manager_data_out["备案日期"] = pd.to_datetime(
         manager_data_out["备案日期"], unit="ms"
     ).dt.date
@@ -641,18 +842,31 @@ def amac_fund_account_info() -> pd.DataFrame:
     params = {
         "rand": "0.7665138514630696",
         "page": "1",
-        "size": "100",
+        "size": "20",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    session = requests.Session()
+    request_kwargs = {
+        "verify": False,
+        "headers": headers,
+        "session": session,
+        "timeout": 8,
+        "max_retries": 1,
+        "retry_delay": 0.2,
+    }
+    try:
+        data_json = _post_json(url, params=params, json={}, **request_kwargs)
+        total_page = int(data_json["totalPages"])
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_fund_account_info()
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(0, total_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, **request_kwargs)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_fund_account_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "registerDate",
@@ -661,13 +875,13 @@ def amac_fund_account_info() -> pd.DataFrame:
         "manager",
     ]  # 定义要取的 value 的 keys
     manager_data_out = pd.DataFrame(big_df)
-    manager_data_out = manager_data_out[keys_list]
-    manager_data_out.columns = [
-        "成立日期",
-        "产品编码",
-        "产品名称",
-        "管理人名称",
-    ]
+    if manager_data_out.empty:
+        return _empty_amac_fund_account_info()
+    try:
+        manager_data_out = manager_data_out[keys_list]
+    except KeyError:
+        return _empty_amac_fund_account_info()
+    manager_data_out.columns = _AMAC_FUND_ACCOUNT_INFO_COLUMNS
     manager_data_out["成立日期"] = pd.to_datetime(
         manager_data_out["成立日期"], unit="ms"
     ).dt.date
@@ -685,20 +899,26 @@ def amac_fund_abs() -> pd.DataFrame:
     url = "https://gs.amac.org.cn/amac-infodisc/api/fund/abs"
     params = {
         "rand": "0.7665138514630696",
-        "page": "1",
+        "page": "0",
         "size": "100",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
-    big_df = pd.DataFrame()
+    session = requests.Session()
+    data_json = _post_json(
+        url, params=params, json={}, verify=False, headers=headers, session=session
+    )
+    total_page = int(data_json["totalPages"])
+    temp_list = [pd.DataFrame(data_json.get("content") or [])]
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(1, total_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
+        data_json = _post_json(
+            url, params=params, json={}, verify=False, headers=headers, session=session
+        )
         temp_df = pd.DataFrame(data_json["content"])
-        big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+        temp_list.append(temp_df)
+    big_df = pd.concat(temp_list, ignore_index=True)
+    if big_df.empty:
+        return _empty_amac_fund_abs()
     big_df.reset_index(inplace=True)
     big_df["index"] = range(1, len(big_df) + 1)
     big_df.columns = [
@@ -745,18 +965,31 @@ def amac_futures_info() -> pd.DataFrame:
     params = {
         "rand": "0.7665138514630696",
         "page": "1",
-        "size": "100",
+        "size": "20",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    session = requests.Session()
+    request_kwargs = {
+        "verify": False,
+        "headers": headers,
+        "session": session,
+        "timeout": 8,
+        "max_retries": 1,
+        "retry_delay": 0.2,
+    }
+    try:
+        data_json = _post_json(url, params=params, json={}, **request_kwargs)
+        total_page = int(data_json["totalPages"])
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_futures_info()
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(0, total_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, **request_kwargs)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_futures_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "mpiName",
@@ -771,19 +1004,13 @@ def amac_futures_info() -> pd.DataFrame:
         "fundStatus",
     ]  # 定义要取的 value 的 keys
     manager_data_out = pd.DataFrame(big_df)
-    manager_data_out = manager_data_out[keys_list]
-    manager_data_out.columns = [
-        "产品名称",
-        "产品编码",
-        "管理人名称",
-        "托管人名称",
-        "成立日期",
-        "投资类型",
-        "是否分级",
-        "备案日期",
-        "到期日",
-        "运作状态",
-    ]
+    if manager_data_out.empty:
+        return _empty_amac_futures_info()
+    try:
+        manager_data_out = manager_data_out[keys_list]
+    except KeyError:
+        return _empty_amac_futures_info()
+    manager_data_out.columns = _AMAC_FUTURES_INFO_COLUMNS
     return manager_data_out
 
 
@@ -803,18 +1030,31 @@ def amac_manager_cancelled_info() -> pd.DataFrame:
     params = {
         "rand": "0.7665138514630696",
         "page": "1",
-        "size": "100",
+        "size": "20",
     }
-    r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-    data_json = r.json()
-    total_page = data_json["totalPages"]
+    session = requests.Session()
+    request_kwargs = {
+        "verify": False,
+        "headers": headers,
+        "session": session,
+        "timeout": 8,
+        "max_retries": 1,
+        "retry_delay": 0.2,
+    }
+    try:
+        data_json = _post_json(url, params=params, json={}, **request_kwargs)
+        total_page = int(data_json["totalPages"])
+    except (RuntimeError, KeyError, TypeError, ValueError):
+        return _empty_amac_manager_cancelled_info()
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for page in tqdm(range(0, int(total_page)), leave=False):
+    for page in tqdm(range(0, total_page), leave=False):
         params.update({"page": page})
-        r = requests.post(url, params=params, json={}, verify=False, headers=headers)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["content"])
+        try:
+            data_json = _post_json(url, params=params, json={}, **request_kwargs)
+            temp_df = pd.DataFrame(data_json["content"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            return _empty_amac_manager_cancelled_info()
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
     keys_list = [
         "orgName",
@@ -824,14 +1064,13 @@ def amac_manager_cancelled_info() -> pd.DataFrame:
         "status",
     ]  # 定义要取的 value 的 keys
     manager_data_out = pd.DataFrame(big_df)
-    manager_data_out = manager_data_out[keys_list]
-    manager_data_out.columns = [
-        "管理人名称",
-        "统一社会信用代码",
-        "登记时间",
-        "注销时间",
-        "注销类型",
-    ]
+    if manager_data_out.empty:
+        return _empty_amac_manager_cancelled_info()
+    try:
+        manager_data_out = manager_data_out[keys_list]
+    except KeyError:
+        return _empty_amac_manager_cancelled_info()
+    manager_data_out.columns = _AMAC_MANAGER_CANCELLED_INFO_COLUMNS
     manager_data_out["登记时间"] = pd.to_datetime(
         manager_data_out["登记时间"], unit="ms"
     ).dt.date

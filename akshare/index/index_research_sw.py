@@ -25,11 +25,23 @@ def index_hist_sw(symbol: str = "801030", period: str = "day") -> pd.DataFrame:
     :return: 指数历史数据
     :rtype: pandas.DataFrame
     """
+    columns = [
+        "代码",
+        "日期",
+        "收盘",
+        "开盘",
+        "最高",
+        "最低",
+        "成交量",
+        "成交额",
+    ]
     period_map = {
         "day": "DAY",
         "week": "WEEK",
         "month": "MONTH",
     }
+    if period not in period_map:
+        return pd.DataFrame(columns=columns)
     url = "https://www.swsresearch.com/institute-sw/api/index_publish/trend/"
     params = {
         "swindexcode": symbol,
@@ -39,9 +51,15 @@ def index_hist_sw(symbol: str = "801030", period: str = "day") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/114.0.0.0 Safari/537.36",
     }
-    r = requests.get(url, params=params, headers=headers, verify=False)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"])
+    try:
+        r = requests.get(url, params=params, headers=headers, verify=False, timeout=15)
+        data_json = r.json()
+        data = data_json.get("data") or []
+    except Exception:
+        return pd.DataFrame(columns=columns)
+    if not data:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame(data)
     temp_df.rename(
         columns={
             "swindexcode": "代码",
@@ -57,20 +75,12 @@ def index_hist_sw(symbol: str = "801030", period: str = "day") -> pd.DataFrame:
         },
         inplace=True,
     )
-    temp_df = temp_df[
-        [
-            "代码",
-            "日期",
-            "收盘",
-            "开盘",
-            "最高",
-            "最低",
-            "成交量",
-            "成交额",
-        ]
-    ]
+    if not set(columns).issubset(temp_df.columns):
+        return pd.DataFrame(columns=columns)
+    temp_df = temp_df[columns]
     temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
     temp_df["收盘"] = pd.to_numeric(temp_df["收盘"], errors="coerce")
+    temp_df["开盘"] = pd.to_numeric(temp_df["开盘"], errors="coerce")
     temp_df["最高"] = pd.to_numeric(temp_df["最高"], errors="coerce")
     temp_df["最低"] = pd.to_numeric(temp_df["最低"], errors="coerce")
     temp_df["成交量"] = pd.to_numeric(temp_df["成交量"], errors="coerce")
@@ -87,6 +97,7 @@ def index_min_sw(symbol: str = "801001") -> pd.DataFrame:
     :return: 指数分时数据
     :rtype: pandas.DataFrame
     """
+    columns = ["代码", "名称", "价格", "日期", "时间"]
     url = (
         "https://www.swsresearch.com/institute-sw/api/index_publish/details/timelines/"
     )
@@ -97,9 +108,15 @@ def index_min_sw(symbol: str = "801001") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/114.0.0.0 Safari/537.36"
     }
-    r = requests.get(url, params=params, headers=headers, verify=False)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"])
+    try:
+        r = requests.get(url, params=params, headers=headers, verify=False, timeout=15)
+        data_json = r.json()
+        data = data_json.get("data") or []
+    except Exception:
+        return pd.DataFrame(columns=columns)
+    if not data:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame(data)
     temp_df.rename(
         columns={
             "l1": "代码",
@@ -110,14 +127,10 @@ def index_min_sw(symbol: str = "801001") -> pd.DataFrame:
         },
         inplace=True,
     )
+    if not set(columns).issubset(temp_df.columns):
+        return pd.DataFrame(columns=columns)
     temp_df = temp_df[
-        [
-            "代码",
-            "名称",
-            "价格",
-            "日期",
-            "时间",
-        ]
+        columns
     ]
     temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
     temp_df["价格"] = pd.to_numeric(temp_df["价格"], errors="coerce")
@@ -163,7 +176,8 @@ def index_component_sw(symbol: str = "801001") -> pd.DataFrame:
             "计入日期",
         ]
     ]
-    temp_df["计入日期"] = pd.to_datetime(temp_df["计入日期"], errors="coerce").dt.date
+    date_text = temp_df["计入日期"].astype(str).str.extract(r"(\d{4}-\d{2}-\d{2})")[0]
+    temp_df["计入日期"] = pd.to_datetime(date_text, errors="coerce").dt.date
     temp_df["最新权重"] = pd.to_numeric(temp_df["最新权重"], errors="coerce")
     return temp_df
 
@@ -286,6 +300,7 @@ def index_analysis_daily_sw(
     symbol: str = "市场表征",
     start_date: str = "20221103",
     end_date: str = "20221103",
+    page_size: int = 10000,
 ) -> pd.DataFrame:
     """
     申万宏源研究-指数分析
@@ -299,10 +314,27 @@ def index_analysis_daily_sw(
     :return: 指数分析
     :rtype: pandas.DataFrame
     """
+    page_size = max(1, int(page_size))
+    columns = [
+        "指数代码",
+        "指数名称",
+        "发布日期",
+        "收盘指数",
+        "成交量",
+        "涨跌幅",
+        "换手率",
+        "市盈率",
+        "市净率",
+        "均价",
+        "成交额占比",
+        "流通市值",
+        "平均流通市值",
+        "股息率",
+    ]
     url = "https://www.swsresearch.com/institute-sw/api/index_analysis/index_analysis_report/"
     params = {
         "page": "1",
-        "page_size": "50",
+        "page_size": str(page_size),
         "index_type": symbol,
         "start_date": "-".join([start_date[:4], start_date[4:6], start_date[6:]]),
         "end_date": "-".join([end_date[:4], end_date[4:6], end_date[6:]]),
@@ -313,18 +345,29 @@ def index_analysis_daily_sw(
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/114.0.0.0 Safari/537.36"
     }
-    r = requests.get(url, params=params, headers=headers, verify=False)
-    data_json = r.json()
-    total_num = data_json["data"]["count"]
-    total_page = math.ceil(total_num / 50)
+    try:
+        r = requests.get(url, params=params, headers=headers, verify=False, timeout=15)
+        data_json = r.json()
+        total_num = data_json.get("data", {}).get("count", 0)
+    except Exception:
+        return pd.DataFrame(columns=columns)
+    if not total_num:
+        return pd.DataFrame(columns=columns)
+    total_page = math.ceil(total_num / page_size)
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
         params.update({"page": page})
-        r = requests.get(url, params=params, headers=headers, verify=False)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["data"]["results"])
+        try:
+            r = requests.get(url, params=params, headers=headers, verify=False, timeout=15)
+            data_json = r.json()
+            results = data_json.get("data", {}).get("results") or []
+        except Exception:
+            continue
+        temp_df = pd.DataFrame(results)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+    if big_df.empty:
+        return pd.DataFrame(columns=columns)
     big_df.rename(
         columns={
             "swindexcode": "指数代码",
@@ -344,6 +387,9 @@ def index_analysis_daily_sw(
         },
         inplace=True,
     )
+    if not set(columns).issubset(big_df.columns):
+        return pd.DataFrame(columns=columns)
+    big_df = big_df[columns]
     big_df["发布日期"] = pd.to_datetime(big_df["发布日期"], errors="coerce").dt.date
     big_df["收盘指数"] = pd.to_numeric(big_df["收盘指数"], errors="coerce")
     big_df["成交量"] = pd.to_numeric(big_df["成交量"], errors="coerce")

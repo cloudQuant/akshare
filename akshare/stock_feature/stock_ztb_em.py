@@ -107,29 +107,48 @@ def stock_zt_pool_em(date: str = "20241008") -> pd.DataFrame:
     return temp_df
 
 
-def stock_zt_pool_previous_em(date: str = "20240415") -> pd.DataFrame:
+def stock_zt_pool_previous_em(date: str | None = None) -> pd.DataFrame:
     """
     东方财富网-行情中心-涨停板行情-昨日涨停股池
     https://quote.eastmoney.com/ztb/detail#type=zrzt
-    :param date: 交易日
+    :param date: 交易日; 不传时自动向前查找最近可用交易日
     :type date: str
     :return: 昨日涨停股池
     :rtype: pandas.DataFrame
     """
+    if date:
+        date_candidates = [date]
+    else:
+        today = datetime.now().date()
+        date_candidates = [
+            (today - timedelta(days=offset)).strftime("%Y%m%d")
+            for offset in range(10)
+        ]
     url = "https://push2ex.eastmoney.com/getYesterdayZTPool"
-    params = {
-        "ut": "7eea3edcaed734bea9cbfc24409ed989",
-        "dpt": "wz.ztzt",
-        "Pageindex": "0",
-        "pagesize": "5000",
-        "sort": "zs:desc",
-        "date": date,
-    }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    if data_json["data"] is None:
-        return pd.DataFrame()
-    if len(data_json["data"]["pool"]) == 0:
+    data_json = None
+    for candidate_date in date_candidates:
+        params = {
+            "ut": "7eea3edcaed734bea9cbfc24409ed989",
+            "dpt": "wz.ztzt",
+            "Pageindex": "0",
+            "pagesize": "5000",
+            "sort": "zs:desc",
+            "date": candidate_date,
+        }
+        r = requests.get(url, params=params)
+        r.raise_for_status()
+        candidate_json = r.json()
+        if candidate_json.get("data") is None:
+            if date:
+                return pd.DataFrame()
+            continue
+        if len(candidate_json["data"].get("pool") or []) == 0:
+            if date:
+                return pd.DataFrame()
+            continue
+        data_json = candidate_json
+        break
+    if data_json is None:
         return pd.DataFrame()
     temp_df = pd.DataFrame(data_json["data"]["pool"])
     temp_df.reset_index(inplace=True)
@@ -354,7 +373,7 @@ def stock_zt_pool_sub_new_em(date: str = "20241231") -> pd.DataFrame:
     return temp_df
 
 
-def stock_zt_pool_zbgc_em(date: str = "20241011") -> pd.DataFrame:
+def stock_zt_pool_zbgc_em(date: str = None) -> pd.DataFrame:
     """
     东方财富网-行情中心-涨停板行情-炸板股池
     https://quote.eastmoney.com/ztb/detail#type=zbgc
@@ -363,6 +382,7 @@ def stock_zt_pool_zbgc_em(date: str = "20241011") -> pd.DataFrame:
     :return: 炸板股池
     :rtype: pandas.DataFrame
     """
+    date = date or datetime.now().strftime("%Y%m%d")
     thirty_days_ago = datetime.now() - timedelta(days=30)
     thirty_days_ago_str = thirty_days_ago.strftime("%Y%m%d")
     if int(date) < int(thirty_days_ago_str):
@@ -377,7 +397,8 @@ def stock_zt_pool_zbgc_em(date: str = "20241011") -> pd.DataFrame:
         "sort": "fbt:asc",
         "date": date,
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
     if data_json["data"] is None:
         return pd.DataFrame()

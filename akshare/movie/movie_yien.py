@@ -75,6 +75,28 @@ def decrypt(origin_data: str = "") -> str:
     return data
 
 
+def _post_endata_json(url: str, payload: dict) -> dict:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Referer": "https://www.endata.com.cn/",
+        "Origin": "https://www.endata.com.cn",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    r = requests.post(url, data=payload, headers=headers, timeout=15)
+    r.encoding = "utf8"
+    if r.status_code != 200:
+        return {}
+    try:
+        return json.loads(decrypt(r.text))
+    except ValueError as exc:
+        return {}
+
+
+def _endata_table(data_json: dict, name: str = "Table") -> list:
+    return ((data_json or {}).get("Data") or {}).get(name) or []
+
+
 def movie_boxoffice_realtime() -> pd.DataFrame:
     """
     电影票房-实时票房
@@ -89,10 +111,13 @@ def movie_boxoffice_realtime() -> pd.DataFrame:
         "tdate": f"{today[:4]}-{today[4:6]}-{today[6:]}",
         "MethodName": "BoxOffice_GetHourBoxOffice",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table1"])
+    data_json = _post_endata_json(url, payload)
+    rows = _endata_table(data_json, "Table1")
+    if not rows:
+        return pd.DataFrame(
+            columns=["排序", "影片名称", "实时票房", "票房占比", "上映天数", "累计票房"]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df = temp_df.iloc[:, :7]
     temp_df.columns = [
         "排序",
@@ -126,10 +151,23 @@ def movie_boxoffice_daily(date: str = "20240219") -> pd.DataFrame:
         "edate": f"{last_date[:4]}-{last_date[4:6]}-{last_date[6:]}",
         "MethodName": "BoxOffice_GetDayBoxOffice",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_json(url, payload)
+    rows = _endata_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "排序",
+                "影片名称",
+                "单日票房",
+                "环比变化",
+                "累计票房",
+                "平均票价",
+                "场均人次",
+                "口碑指数",
+                "上映天数",
+            ]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.columns = [
         "排序",
         "_",
@@ -179,9 +217,24 @@ def movie_boxoffice_weekly(date: str = "20240218") -> pd.DataFrame:
         "sdate": get_current_week(date=date).strftime("%Y-%m-%d"),
         "MethodName": "BoxOffice_GetWeekInfoData",
     }
-    r = requests.post(url, data=payload)
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_json(url, payload)
+    rows = _endata_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "排序",
+                "影片名称",
+                "排名变化",
+                "单周票房",
+                "环比变化",
+                "累计票房",
+                "平均票价",
+                "场均人次",
+                "口碑指数",
+                "上映天数",
+            ]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.columns = [
         "排序",
         "_",
@@ -233,10 +286,23 @@ def movie_boxoffice_monthly(date: str = "20240218") -> pd.DataFrame:
         "startTime": f"{date[:4]}-{date[4:6]}-01",
         "MethodName": "BoxOffice_GetMonthBox",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_json(url, payload)
+    rows = _endata_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "排序",
+                "影片名称",
+                "单月票房",
+                "月度占比",
+                "平均票价",
+                "场均人次",
+                "上映日期",
+                "口碑指数",
+                "月内天数",
+            ]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.columns = [
         "排序",
         "_",
@@ -281,10 +347,13 @@ def movie_boxoffice_yearly(date: str = "20240218") -> pd.DataFrame:
         "year": f"{date[:4]}",
         "MethodName": "BoxOffice_GetYearInfoData",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_json(url, payload)
+    rows = _endata_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=["排序", "影片名称", "类型", "总票房", "平均票价", "场均人次", "国家及地区", "上映日期"]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.reset_index(inplace=True)
     temp_df.columns = [
         "排序",
@@ -329,10 +398,23 @@ def movie_boxoffice_yearly_first_week(date: str = "20201018") -> pd.DataFrame:
         "year": f"{date[:4]}",
         "MethodName": "BoxOffice_getYearInfo_fData",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_json(url, payload)
+    rows = _endata_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "排序",
+                "影片名称",
+                "类型",
+                "首周票房",
+                "占总票房比重",
+                "场均人次",
+                "国家及地区",
+                "上映日期",
+                "首周天数",
+            ]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.reset_index(inplace=True)
     temp_df.columns = [
         "排序",
@@ -382,10 +464,13 @@ def movie_boxoffice_cinema_daily(date: str = "20240219") -> pd.DataFrame:
         "date": date,
         "MethodName": "BoxOffice_GetCinemaDayBoxOffice",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_json(url, payload)
+    rows = _endata_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=["排序", "影院名称", "单日票房", "单日场次", "场均人次", "场均票价", "上座率"]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.columns = [
         "排序",
         "_",
@@ -427,10 +512,21 @@ def movie_boxoffice_cinema_weekly(date: str = "20240219") -> pd.DataFrame:
         "rowNum2": "100",
         "MethodName": "BoxOffice_GetCinemaWeekBoxOffice",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_json(url, payload)
+    rows = _endata_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "排序",
+                "影院名称",
+                "当周票房",
+                "单银幕票房",
+                "场均人次",
+                "单日单厅票房",
+                "单日单厅场次",
+            ]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.columns = [
         "排序",
         "_",

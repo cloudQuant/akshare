@@ -14,6 +14,7 @@ from io import BytesIO
 import pandas as pd
 import requests
 
+from akshare.utils.request import request_szse
 from akshare.option.cons import (
     SH_OPTION_PAYLOAD,
     SH_OPTION_PAYLOAD_OTHER,
@@ -49,7 +50,7 @@ def option_finance_sse_underlying(symbol: str = "华夏科创50ETF期权") -> pd
     }
     r = requests.get(symbol_map[symbol], params=SH_OPTION_PAYLOAD)
     data_json = r.json()
-    raw_data = pd.DataFrame(data_json["list"])
+    raw_data = pd.DataFrame(data_json["list"]).astype("object")
     raw_data.at[0, 0] = "510300"
     raw_data.at[0, 8] = pd.to_datetime(
         str(data_json["date"]) + str(data_json["time"]),
@@ -213,7 +214,7 @@ def option_finance_board(
             "PAGENO": "1",
             "random": "0.10642298535346595",
         }
-        r = requests.get(url, params=params)
+        r = request_szse(url, params=params, timeout=30)
         data_json = r.json()
         page_num = data_json[0]["metadata"]["pagecount"]
         big_df = pd.DataFrame()
@@ -225,7 +226,7 @@ def option_finance_board(
                 "PAGENO": page,
                 "random": "0.10642298535346595",
             }
-            r = requests.get(url, params=params)
+            r = request_szse(url, params=params, timeout=30)
             data_json = r.json()
             temp_df = pd.DataFrame(data_json[0]["data"])
             big_df = pd.concat([big_df, temp_df], ignore_index=True)

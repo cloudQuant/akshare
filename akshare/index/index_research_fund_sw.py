@@ -11,6 +11,9 @@ import requests
 
 from akshare.utils.cons import headers
 
+_FUND_SW_REALTIME_COLUMNS = ["指数代码", "指数名称", "昨收盘", "日涨跌幅", "年涨跌幅"]
+_FUND_SW_HIST_COLUMNS = ["日期", "收盘指数", "开盘指数", "最高指数", "最低指数", "涨跌幅"]
+
 
 def index_realtime_fund_sw(symbol: str = "基础一级") -> pd.DataFrame:
     """
@@ -30,9 +33,15 @@ def index_realtime_fund_sw(symbol: str = "基础一级") -> pd.DataFrame:
         "rule": "",
         "indexType": 1,
     }
-    r = requests.post(url, json=payload, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"]["list"])
+    try:
+        r = requests.post(url, json=payload, headers=headers, verify=False, timeout=15)
+        data_json = r.json()
+        data = data_json.get("data", {}).get("list") or []
+    except Exception:
+        return pd.DataFrame(columns=_FUND_SW_REALTIME_COLUMNS)
+    if not data:
+        return pd.DataFrame(columns=_FUND_SW_REALTIME_COLUMNS)
+    temp_df = pd.DataFrame(data)
     temp_df.rename(
         columns={
             "swIndexCode": "指数代码",
@@ -43,15 +52,9 @@ def index_realtime_fund_sw(symbol: str = "基础一级") -> pd.DataFrame:
         },
         inplace=True,
     )
-    temp_df = temp_df[
-        [
-            "指数代码",
-            "指数名称",
-            "昨收盘",
-            "日涨跌幅",
-            "年涨跌幅",
-        ]
-    ]
+    if not set(_FUND_SW_REALTIME_COLUMNS).issubset(temp_df.columns):
+        return pd.DataFrame(columns=_FUND_SW_REALTIME_COLUMNS)
+    temp_df = temp_df[_FUND_SW_REALTIME_COLUMNS]
     temp_df["昨收盘"] = pd.to_numeric(temp_df["昨收盘"], errors="coerce")
     temp_df["日涨跌幅"] = pd.to_numeric(temp_df["日涨跌幅"], errors="coerce")
     temp_df["年涨跌幅"] = pd.to_numeric(temp_df["年涨跌幅"], errors="coerce")
@@ -74,11 +77,19 @@ def index_hist_fund_sw(symbol: str = "807200", period: str = "day") -> pd.DataFr
         "week": "WEEK",
         "month": "MONTH",
     }
+    if period not in period_map:
+        return pd.DataFrame(columns=_FUND_SW_HIST_COLUMNS)
     url = "https://www.swsresearch.com/insWechatSw/fundIndex/getFundKChartData"
     payload = {"swIndexCode": symbol, "type": period_map[period]}
-    r = requests.post(url, json=payload, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"])
+    try:
+        r = requests.post(url, json=payload, headers=headers, verify=False, timeout=15)
+        data_json = r.json()
+        data = data_json.get("data") or []
+    except Exception:
+        return pd.DataFrame(columns=_FUND_SW_HIST_COLUMNS)
+    if not data:
+        return pd.DataFrame(columns=_FUND_SW_HIST_COLUMNS)
+    temp_df = pd.DataFrame(data)
     temp_df.rename(
         columns={
             "bargaindate": "日期",
@@ -92,16 +103,9 @@ def index_hist_fund_sw(symbol: str = "807200", period: str = "day") -> pd.DataFr
         },
         inplace=True,
     )
-    temp_df = temp_df[
-        [
-            "日期",
-            "收盘指数",
-            "开盘指数",
-            "最高指数",
-            "最低指数",
-            "涨跌幅",
-        ]
-    ]
+    if not set(_FUND_SW_HIST_COLUMNS).issubset(temp_df.columns):
+        return pd.DataFrame(columns=_FUND_SW_HIST_COLUMNS)
+    temp_df = temp_df[_FUND_SW_HIST_COLUMNS]
     temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
     temp_df["收盘指数"] = pd.to_numeric(temp_df["收盘指数"], errors="coerce")
     temp_df["最高指数"] = pd.to_numeric(temp_df["最高指数"], errors="coerce")

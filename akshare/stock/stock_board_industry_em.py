@@ -13,6 +13,7 @@ import pandas as pd
 import requests
 
 from akshare.utils.func import fetch_paginated_data
+from akshare.utils.request import request_eastmoney
 
 
 @lru_cache()
@@ -243,8 +244,10 @@ def stock_board_industry_spot_em(symbol: str = "小金属") -> pd.DataFrame:
         fltt="1",
         secid=f"90.{em_code}",
     )
-    r = requests.get(url, params=params)
+    r = request_eastmoney(url, params=params, timeout=15)
     data_dict = r.json()
+    if not data_dict.get("data"):
+        return pd.DataFrame(columns=["item", "value"])
     result = pd.DataFrame.from_dict(data_dict["data"], orient="index")
     result.rename(field_map, inplace=True)
     result.reset_index(inplace=True)
@@ -304,10 +307,10 @@ def stock_board_industry_hist_em(
         "smplmt": "10000",
         "lmt": "1000000",
     }
-    r = requests.get(url, params=params)
+    r = request_eastmoney(url, params=params, timeout=15)
     data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    temp_df.columns = [
+    klines = (data_json.get("data") or {}).get("klines") or []
+    columns = [
         "日期",
         "开盘",
         "收盘",
@@ -320,6 +323,10 @@ def stock_board_industry_hist_em(
         "涨跌额",
         "换手率",
     ]
+    if not klines:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
+    temp_df.columns = columns
     temp_df = temp_df[
         [
             "日期",
@@ -375,12 +382,10 @@ def stock_board_industry_hist_min_em(
             "ndays": "1",
             "secid": f"90.{em_code}",
         }
-        r = requests.get(url, params=params)
+        r = request_eastmoney(url, params=params, timeout=15)
         data_json = r.json()
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["trends"]]
-        )
-        temp_df.columns = [
+        trends = (data_json.get("data") or {}).get("trends") or []
+        columns = [
             "日期时间",
             "开盘",
             "收盘",
@@ -390,6 +395,10 @@ def stock_board_industry_hist_min_em(
             "成交额",
             "最新价",
         ]
+        if not trends:
+            return pd.DataFrame(columns=columns)
+        temp_df = pd.DataFrame([item.split(",") for item in trends])
+        temp_df.columns = columns
 
         temp_df["开盘"] = pd.to_numeric(temp_df["开盘"], errors="coerce")
         temp_df["收盘"] = pd.to_numeric(temp_df["收盘"], errors="coerce")
@@ -412,12 +421,10 @@ def stock_board_industry_hist_min_em(
             "smplmt": "10000",
             "lmt": "1000000",
         }
-        r = requests.get(url, params=params)
+        r = request_eastmoney(url, params=params, timeout=15)
         data_json = r.json()
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
-        )
-        temp_df.columns = [
+        klines = (data_json.get("data") or {}).get("klines") or []
+        columns = [
             "日期时间",
             "开盘",
             "收盘",
@@ -430,6 +437,10 @@ def stock_board_industry_hist_min_em(
             "涨跌额",
             "换手率",
         ]
+        if not klines:
+            return pd.DataFrame(columns=columns)
+        temp_df = pd.DataFrame([item.split(",") for item in klines])
+        temp_df.columns = columns
         temp_df = temp_df[
             [
                 "日期时间",

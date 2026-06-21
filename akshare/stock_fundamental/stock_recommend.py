@@ -6,6 +6,8 @@ Desc: 新浪财经-机构推荐池
 http://stock.finance.sina.com.cn/stock/go.php/vIR_RatingNewest/index.phtml
 """
 
+from io import StringIO
+
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -43,7 +45,7 @@ def stock_institute_recommend(symbol: str = "投资评级选股") -> pd.DataFram
         temp_df = temp_df.rename(columns={"综合评级↓": "综合评级"})
         return temp_df
     if symbol == "首次评级股票":
-        temp_df = pd.read_html(r.text, header=0)[0].iloc[:, :8]
+        temp_df = pd.read_html(StringIO(r.text), header=0)[0].iloc[:, :8]
         temp_df["股票代码"] = temp_df["股票代码"].astype(str).str.zfill(6)
         temp_df = temp_df.rename(columns={"评级日期↓": "评级日期"})
         return temp_df
@@ -87,8 +89,12 @@ def stock_institute_recommend_detail(symbol: str = "000001") -> pd.DataFrame:
         "num": "5000",
         "p": "1",
     }
-    r = requests.get(url, params=params)
-    temp_df = pd.read_html(r.text, header=0)[0].iloc[:, :8]
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
+    try:
+        temp_df = pd.read_html(StringIO(r.text), header=0)[0].iloc[:, :8]
+    except (ImportError, ValueError):
+        return pd.DataFrame()
     temp_df["股票代码"] = temp_df["股票代码"].astype(str).str.zfill(6)
     temp_df = temp_df.rename(columns={"评级日期↓": "评级日期"})
     return temp_df

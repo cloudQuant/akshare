@@ -9,6 +9,7 @@
 ```
  # 交易所期货数据
  "get_cffex_daily",  # 中国金融期货交易所每日交易数据
+ "futures_hist_daily_cffex",  # 中国金融期货交易所-每日交易数据
  "get_cffex_rank_table",  # 中国金融期货交易所前20会员持仓数据明细
  "get_czce_daily",  # 郑州商品交易所每日交易数据
  "get_rank_table_czce",  # 郑州商品交易所前20会员持仓数据明细
@@ -96,6 +97,7 @@
  "stock_zh_ah_name"  #  A+H 股所有股票代码
  # A股实时行情数据和历史行情数据
  "stock_zh_a_spot"  # 新浪 A 股实时行情数据
+ "stock_zh_a_spot_tx"  # 腾讯 A 股实时行情数据
  "stock_zh_a_spot_em"  # 东财 A 股实时行情数据
  "stock_sh_a_spot_em"  # 东财沪 A 股实时行情数据
  "stock_sz_a_spot_em"  # 东财深 A 股实时行情数据
@@ -168,8 +170,6 @@
  "energy_carbon_eu"  # 碳排放权-国际
  "energy_carbon_hb"  # 碳排放权-湖北
  "energy_carbon_gz"  # 碳排放权-广州
- # 生活成本
- "cost_living"  # 世界各大城市生活成本数据
  # 商品现货价格指数
  "spot_goods"  # 商品现货价格指数
  # 中国宏观杠杆率
@@ -185,6 +185,7 @@
  "stock_gpzy_profile_em"  # 股权质押市场概况
  "stock_gpzy_pledge_ratio_em"  # 上市公司质押比例
  "stock_gpzy_pledge_ratio_detail_em"  # 重要股东股权质押明细
+ "stock_gpzy_individual_pledge_ratio_detail_em"  # 个股重要股东股权质押明细
  "stock_gpzy_distribute_statistics_company_em"  # 质押机构分布统计-证券公司
  "stock_gpzy_distribute_statistics_bank_em"  # 质押机构分布统计-银行
  "stock_gpzy_industry_data_em"  # 上市公司质押比例-行业数据
@@ -390,7 +391,6 @@
  "stock_comment_detail_zhpj_lspf_em"  # 综合评价-历史评分
  "stock_comment_detail_scrd_focus_em"  # 市场热度-用户关注指数
  "stock_comment_detail_scrd_desire_em"  # 市场热度-市场参与意愿
- "stock_comment_detail_scrd_desire_daily_em"  # 市场热度-日度市场参与意愿
  # 沪深港通
  "stock_hk_ggt_components_em"  # 港股通成份股
  "stock_hsgt_hold_stock_em"  # 沪深港通持股-个股排行
@@ -433,6 +433,8 @@
  "stock_financial_analysis_indicator"  # 财务指标
  "stock_add_stock"  # 股票增发
  "stock_ipo_info"  # 股票新股
+ "stock_ipo_ths"  # 新股申购与中签
+ "stock_ipo_hk_ths"  # 新股申购与中签
  "stock_history_dividend_detail"  # 分红配股
  "stock_history_dividend"  # 历史分红
  "stock_dividend_cninfo"  # 个股历史分红
@@ -484,7 +486,7 @@
  "stock_a_high_low_statistics"  # 创新高和新低的股票数量
  "stock_a_below_net_asset_statistics"  # 破净股统计
  # 交易日历
- "tool_trade_date_hist"  # 新浪财经-交易日历
+ "tool_trade_date_hist_sina"  # 新浪财经-交易日历
  # 基金行情
  "fund_etf_category_sina"  # 基金实时行情-新浪
  "fund_etf_hist_sina"  # 基金行情-新浪
@@ -649,7 +651,7 @@
  "stock_lrb_em"  # 三大表报-利润表
  "stock_xjll_em"  # 三大表报-现金流量表
  # 首发企业申报
- "stock_ipo_declare"  # 首发企业申报
+ "stock_ipo_declare_em"  # 首发企业申报
  # 行业板块
  "stock_board_industry_index_ths"  # 同花顺-行业板块-指数日频数据
  # 概念板块
@@ -669,6 +671,7 @@
  "stock_ggcg_em"  # 高管持股
  # 新发基金
  "fund_new_found_em"  # 新发基金
+ "fund_new_found_ths"  # 新发基金
  # 柯桥指数
  "index_kq_fz"  # 柯桥纺织指数
  "index_kq_fashion"  # 柯桥时尚指数
@@ -875,6 +878,7 @@
  "fund_report_stock_cninfo"  # 基金报表-基金重仓股
  # 公告大全-沪深 A 股公告
  "stock_notice_report"  # 公告大全-沪深 A 股公告
+ "stock_individual_notice_report"  # 公告大全-沪深 A 股个股公告
  # 基金报表-基金行业配置
  "fund_report_industry_allocation_cninfo"  # 基金报表-基金行业配置
  "fund_report_asset_allocation_cninfo"  # 基金报表-基金资产配置
@@ -882,6 +886,7 @@
  "fund_scale_open_sina"  # 基金规模-开放式基金
  "fund_scale_close_sina"  # 基金规模-封闭式基金
  "fund_scale_structured_sina"  # 基金规模-分级子基金
+ "fund_scale_daily_szse"  # 深圳证券交易所-基金产品-基金规模-日频数据
  # 沪深港通持股
  "stock_hsgt_individual_em"  # 沪深港通持股-具体股票
  "stock_hsgt_individual_detail_em"  # 沪深港通持股-具体股票-详情
@@ -1174,10 +1179,10 @@
  "stock_hk_index_spot_em"  # 东方财富网-行情中心-港股-指数实时行情
  "stock_hk_index_daily_em"  # 东方财富网-港股-股票指数数据
  # 同花顺-财务指标-主要指标
- "stock_financial_abstract_ths"  # 同花顺-财务指标-主要指标
- "stock_financial_debt_ths"  # 同花顺-财务指标-资产负债表
- "stock_financial_benefit_ths"  # 同花顺-财务指标-利润表
- "stock_financial_cash_ths"  # 同花顺-财务指标-现金流量表
+ "stock_financial_abstract_new_ths"  # 同花顺-财务指标-主要指标
+ "stock_financial_debt_new_ths"  # 同花顺-财务指标-资产负债表
+ "stock_financial_benefit_new_ths"  # 同花顺-财务指标-利润表
+ "stock_financial_cash_new_ths"  # 同花顺-财务指标-现金流量表
  # LOF 行情
  "fund_lof_hist_em"  # 东方财富-LOF 行情
  "fund_lof_spot_em"  # 东方财富-LOF 实时行情
@@ -1366,6 +1371,20 @@
  "option_current_day_sse"  # 上海证券交易所-产品-股票期权-信息披露-当日合约
  # 期权合约信息
  "option_contract_info_ctp"  # 期权合约信息
+ # 百度股市通-美股-财务报表-估值数据
+ "stock_us_valuation_baidu"  # 百度股市通-美股-财务报表-估值数据
+ # 基金份额
+ "fund_etf_scale_szse"  # 深圳证券交易所-基金产品-基金列表-ETF基金份额
+ "fund_etf_scale_sse"  # 上海证券交易所-产品-基金产品-ETF产品-ETF产品列表-基金规模
+ # 新浪财经-债券-美国国债收益率行情数据
+ "bond_gb_us_sina"  # 新浪财经-债券-美国国债收益率行情数据
+ "bond_gb_zh_sina"  # 新浪财经-债券-中国国债收益率行情数据
+ # 期货交易所结算参数
+ "futures_settle"  # 期货交易所结算参数
+ # 基金基本信息-同花顺
+ "fund_info_ths"  # 基金基本信息-同花顺
+ # TapTap 游戏榜单
+ "game_hot_rank_taptap"  # TapTap 游戏榜单
 ```
 
 ## 案例演示

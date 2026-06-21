@@ -14,6 +14,7 @@ from io import BytesIO, StringIO
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from akshare.utils.request import request_szse
 
 
 def stock_szse_summary(date: str = "20240830") -> pd.DataFrame:
@@ -33,7 +34,7 @@ def stock_szse_summary(date: str = "20240830") -> pd.DataFrame:
         "txtQueryDate": "-".join([date[:4], date[4:6], date[6:]]),
         "random": "0.39339437497296137",
     }
-    r = requests.get(url, params=params)
+    r = request_szse(url, params=params)
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         temp_df = pd.read_excel(BytesIO(r.content), engine="openpyxl")
@@ -64,7 +65,7 @@ def stock_szse_area_summary(date: str = "202203") -> pd.DataFrame:
         "DATETIME": "-".join([date[:4], date[4:6]]),
         "random": "0.39349437497296137",
     }
-    r = requests.get(url, params=params)
+    r = request_szse(url, params=params)
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         temp_df = pd.read_excel(BytesIO(r.content), engine="openpyxl")
@@ -80,23 +81,25 @@ def stock_szse_area_summary(date: str = "202203") -> pd.DataFrame:
         "期权交易额(元)": "期权交易额",
     }
     temp_df.rename(columns=column_map, inplace=True)
-    temp_df["总交易额"] = temp_df["总交易额"].str.replace(",", "")
+    temp_df["总交易额"] = temp_df["总交易额"].astype("str").str.replace(",", "")
     temp_df["总交易额"] = pd.to_numeric(temp_df["总交易额"], errors="coerce")
     temp_df["占市场"] = pd.to_numeric(temp_df["占市场"], errors="coerce")
-    temp_df["股票交易额"] = temp_df["股票交易额"].str.replace(",", "")
+    temp_df["股票交易额"] = temp_df["股票交易额"].astype("str").str.replace(",", "")
     temp_df["股票交易额"] = pd.to_numeric(temp_df["股票交易额"], errors="coerce")
-    temp_df["基金交易额"] = temp_df["基金交易额"].str.replace(",", "")
+    temp_df["基金交易额"] = temp_df["基金交易额"].astype("str").str.replace(",", "")
     temp_df["基金交易额"] = pd.to_numeric(temp_df["基金交易额"], errors="coerce")
-    temp_df["债券交易额"] = temp_df["债券交易额"].str.replace(",", "")
+    temp_df["债券交易额"] = temp_df["债券交易额"].astype("str").str.replace(",", "")
     temp_df["债券交易额"] = pd.to_numeric(temp_df["债券交易额"], errors="coerce")
     if "优先股交易额" in temp_df.columns:
-        temp_df['优先股交易额'] = temp_df['优先股交易额'].astype('str')  # 2025年2月为float
+        temp_df["优先股交易额"] = temp_df["优先股交易额"].astype(
+            "str"
+        )  # 2025年2月为float
         temp_df["优先股交易额"] = temp_df["优先股交易额"].str.replace(",", "")
         temp_df["优先股交易额"] = pd.to_numeric(
             temp_df["优先股交易额"], errors="coerce"
         )
     if "期权交易额" in temp_df.columns:
-        temp_df['期权交易额'] = temp_df['期权交易额'].astype('str')
+        temp_df["期权交易额"] = temp_df["期权交易额"].astype("str")
         temp_df["期权交易额"] = temp_df["期权交易额"].str.replace(",", "")
         temp_df["期权交易额"] = pd.to_numeric(temp_df["期权交易额"], errors="coerce")
     return temp_df
@@ -124,7 +127,7 @@ def stock_szse_sector_summary(
     )
     tags_dict = [
         eval(
-            item.string[item.string.find("{"): item.string.find("}") + 1]
+            item.string[item.string.find("{") : item.string.find("}") + 1]
             .replace("\n", "")
             .replace(" ", "")
             .replace("value", "'value'")
@@ -209,7 +212,7 @@ def stock_sse_summary() -> pd.DataFrame:
     headers = {
         "Referer": "http://www.sse.com.cn/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/89.0.4389.90 Safari/537.36",
+        "Chrome/89.0.4389.90 Safari/537.36",
     }
     r = requests.get(url, params=params, headers=headers)
     data_json = r.json()
@@ -256,7 +259,7 @@ def stock_sse_deal_daily(date: str = "20241216") -> pd.DataFrame:
     headers = {
         "Referer": "https://www.sse.com.cn/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/89.0.4389.90 Safari/537.36",
+        "Chrome/89.0.4389.90 Safari/537.36",
     }
     r = requests.get(url, params=params, headers=headers)
     data_json = r.json()

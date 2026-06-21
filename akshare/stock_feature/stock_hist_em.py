@@ -10,6 +10,25 @@ import pandas as pd
 import requests
 
 from akshare.utils.func import fetch_paginated_data
+from akshare.utils.request import request_eastmoney
+
+
+def _get_eastmoney_json(url: str, params: dict, endpoint_name: str):
+    try:
+        r = request_eastmoney(url, timeout=15, params=params)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Eastmoney {endpoint_name} endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} endpoint returned HTTP {r.status_code}: {url}"
+        )
+    try:
+        return r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
 
 
 def stock_zh_a_spot_em() -> pd.DataFrame:
@@ -31,7 +50,7 @@ def stock_zh_a_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,"
-                  "f20,f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
+        "f20,f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -140,7 +159,7 @@ def stock_sh_a_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:1 t:2,m:1 t:23",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,"
-                  "f24,f25,f22,f11,f62,f128,f136,f115,f152",
+        "f24,f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -248,7 +267,7 @@ def stock_sz_a_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:0 t:6,m:0 t:80",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,"
-                  "f25,f22,f11,f62,f128,f136,f115,f152",
+        "f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -356,7 +375,7 @@ def stock_bj_a_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:0 t:81 s:2048",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24"
-                  ",f25,f22,f11,f62,f128,f136,f115,f152",
+        ",f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -465,7 +484,7 @@ def stock_new_a_spot_em() -> pd.DataFrame:
         "fid": "f26",
         "fs": "m:0 f:8,m:1 f:8",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,"
-                  "f25,f26,f22,f11,f62,f128,f136,f115,f152",
+        "f25,f26,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -578,7 +597,7 @@ def stock_cy_a_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:0 t:80",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,"
-                  "f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
+        "f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -687,7 +706,7 @@ def stock_kc_a_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:1 t:23",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,"
-                  "f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
+        "f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -813,24 +832,26 @@ def stock_zh_ab_comparison_em() -> pd.DataFrame:
         "f200": "-",
         "f201": "B股代码",
         "f202": "-",
-        "f203": "B股名称"
+        "f203": "B股名称",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df = temp_df.rename(columns=columns_map)
     list_name = [value for key, value in columns_map.items() if value != "_"]
     temp_df = temp_df[list_name]
-    temp_df = temp_df[[
-        "序号",
-        "B股代码",
-        "B股名称",
-        "最新价B",
-        "涨跌幅B",
-        "A股代码",
-        "A股名称",
-        "最新价A",
-        "涨跌幅A",
-        "比价",
-    ]]
+    temp_df = temp_df[
+        [
+            "序号",
+            "B股代码",
+            "B股名称",
+            "最新价B",
+            "涨跌幅B",
+            "A股代码",
+            "A股名称",
+            "最新价A",
+            "涨跌幅A",
+            "比价",
+        ]
+    ]
     temp_df["最新价B"] = pd.to_numeric(temp_df["最新价B"], errors="coerce") / 100
     temp_df["涨跌幅B"] = pd.to_numeric(temp_df["涨跌幅B"], errors="coerce") / 100
     temp_df["最新价A"] = pd.to_numeric(temp_df["最新价A"], errors="coerce") / 100
@@ -858,7 +879,7 @@ def stock_zh_b_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:0 t:7,m:1 t:3",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20"
-                  ",f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
+        ",f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -987,7 +1008,7 @@ def stock_zh_a_hist(
         "beg": start_date,
         "end": end_date,
     }
-    r = requests.get(url, params=params, timeout=timeout)
+    r = request_eastmoney(url, params=params, timeout=timeout)
     data_json = r.json()
     if not (data_json["data"] and data_json["data"]["klines"]):
         return pd.DataFrame()
@@ -1076,11 +1097,12 @@ def stock_zh_a_hist_min_em(
             "iscr": "0",
             "secid": f"{market_code}.{symbol}",
         }
-        r = requests.get(url, timeout=150, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_json(url, params, "A-share minute history")
         temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["trends"]]
+            [item.split(",") for item in (data_json.get("data") or {}).get("trends") or []]
         )
+        if temp_df.empty:
+            return pd.DataFrame()
         temp_df.columns = [
             "时间",
             "开盘",
@@ -1115,11 +1137,12 @@ def stock_zh_a_hist_min_em(
             "beg": "0",
             "end": "20500000",
         }
-        r = requests.get(url, timeout=150, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_json(url, params, "A-share minute kline")
         temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
+            [item.split(",") for item in (data_json.get("data") or {}).get("klines") or []]
         )
+        if temp_df.empty:
+            return pd.DataFrame()
         temp_df.columns = [
             "时间",
             "开盘",
@@ -1192,9 +1215,11 @@ def stock_zh_a_hist_pre_min_em(
         "iscca": "0",
         "secid": f"{market_code}.{symbol}",
     }
-    r = requests.get(url, timeout=150, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["trends"]])
+    data_json = _get_eastmoney_json(url, params, "A-share pre-market minute history")
+    trends = (data_json.get("data") or {}).get("trends") or []
+    if not trends:
+        return pd.DataFrame()
+    temp_df = pd.DataFrame([item.split(",") for item in trends])
     temp_df.columns = [
         "时间",
         "开盘",
@@ -1207,7 +1232,7 @@ def stock_zh_a_hist_pre_min_em(
     ]
     temp_df.index = pd.to_datetime(temp_df["时间"])
     date_format = temp_df.index[0].date().isoformat()
-    temp_df = temp_df[date_format + " " + start_time: date_format + " " + end_time]
+    temp_df = temp_df[date_format + " " + start_time : date_format + " " + end_time]
     temp_df.reset_index(drop=True, inplace=True)
     temp_df["开盘"] = pd.to_numeric(temp_df["开盘"], errors="coerce")
     temp_df["收盘"] = pd.to_numeric(temp_df["收盘"], errors="coerce")
@@ -1239,7 +1264,7 @@ def stock_hk_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:128 t:3,m:128 t:4,m:128 t:1,m:128 t:2",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,"
-                  "f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
+        "f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -1324,7 +1349,7 @@ def stock_hk_main_board_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:128 t:3",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,"
-                  "f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
+        "f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -1425,11 +1450,12 @@ def stock_hk_hist(
         "end": "20500000",
         "lmt": "1000000",
     }
-    r = requests.get(url, timeout=150, params=params)
+    r = request_eastmoney(url, timeout=150, params=params)
     data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    if temp_df.empty:
+    klines = (data_json.get("data") or {}).get("klines") or []
+    if not klines:
         return pd.DataFrame()
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
     temp_df.columns = [
         "日期",
         "开盘",
@@ -1499,10 +1525,12 @@ def stock_hk_hist_min_em(
             "ndays": "5",
             "secid": f"116.{symbol}",
         }
-        r = requests.get(url, timeout=150, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_json(url, params, "HK minute history")
+        trends = (data_json.get("data") or {}).get("trends") or []
+        if not trends:
+            return pd.DataFrame()
         temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["trends"]]
+            [item.split(",") for item in trends]
         )
         temp_df.columns = [
             "时间",
@@ -1538,10 +1566,12 @@ def stock_hk_hist_min_em(
             "beg": "0",
             "end": "20500000",
         }
-        r = requests.get(url, timeout=150, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_json(url, params, "HK minute kline")
+        klines = (data_json.get("data") or {}).get("klines") or []
+        if not klines:
+            return pd.DataFrame()
         temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
+            [item.split(",") for item in klines]
         )
         temp_df.columns = [
             "时间",
@@ -1607,7 +1637,7 @@ def stock_us_spot_em() -> pd.DataFrame:
         "fid": "f12",
         "fs": "m:105,m:106,m:107",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,"
-                  "f21,f23,f24,f25,f26,f22,f33,f11,f62,f128,f136,f115,f152",
+        "f21,f23,f24,f25,f26,f22,f33,f11,f62,f128,f136,f115,f152",
     }
     temp_df = fetch_paginated_data(url, params)
     temp_df.columns = [
@@ -1718,11 +1748,12 @@ def stock_us_hist(
         "end": "20500000",
         "lmt": "1000000",
     }
-    r = requests.get(url, timeout=150, params=params)
+    r = request_eastmoney(url, timeout=150, params=params)
     data_json = r.json()
-    if not data_json["data"]["klines"]:
+    klines = (data_json.get("data") or {}).get("klines") or []
+    if not klines:
         return pd.DataFrame()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
     temp_df.columns = [
         "日期",
         "开盘",
@@ -1778,11 +1809,11 @@ def stock_us_hist_min_em(
         "ndays": "5",
         "secid": f"{symbol.split('.')[0]}.{symbol.split('.')[1]}",
     }
-    r = requests.get(url, params=params, timeout=150)
-    data_json = r.json()
-    if not data_json["data"]["trends"]:
+    data_json = _get_eastmoney_json(url, params, "US minute history")
+    trends = (data_json.get("data") or {}).get("trends") or []
+    if not trends:
         return pd.DataFrame()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["trends"]])
+    temp_df = pd.DataFrame([item.split(",") for item in trends])
     temp_df.columns = [
         "时间",
         "开盘",

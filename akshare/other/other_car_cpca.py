@@ -425,9 +425,11 @@ def __car_market_cate_cpca_pifa(symbol: str = "MPV") -> pd.DataFrame:
     big_df = pd.DataFrame()
     if symbol == "MPV":
         temp_df = pd.DataFrame(data_json[0]["dataList"])
+        temp_df = temp_df.dropna(subset=[temp_df.columns[1], temp_df.columns[2]])
+        temp_df.reset_index(drop=True, inplace=True)
         temp_current_year_list = []
         temp_previous_year_list = []
-        for item in data_json[0]["dataList"]:
+        for item in temp_df.to_dict("records"):
             temp_previous_year_list.append(item[temp_df.columns[1]])
             try:
                 temp_current_year_list.append(item[temp_df.columns[2]])
@@ -449,9 +451,11 @@ def __car_market_cate_cpca_pifa(symbol: str = "MPV") -> pd.DataFrame:
         ]
     elif symbol == "SUV":
         temp_df = pd.DataFrame(data_json[1]["dataList"])
+        temp_df = temp_df.dropna(subset=[temp_df.columns[1], temp_df.columns[2]])
+        temp_df.reset_index(drop=True, inplace=True)
         temp_current_year_list = []
         temp_previous_year_list = []
-        for item in data_json[1]["dataList"]:
+        for item in temp_df.to_dict("records"):
             temp_previous_year_list.append(item[temp_df.columns[1]])
             try:
                 temp_current_year_list.append(item[temp_df.columns[2]])
@@ -473,9 +477,11 @@ def __car_market_cate_cpca_pifa(symbol: str = "MPV") -> pd.DataFrame:
         ]
     elif symbol == "轿车":
         temp_df = pd.DataFrame(data_json[2]["dataList"])
+        temp_df = temp_df.dropna(subset=[temp_df.columns[1], temp_df.columns[2]])
+        temp_df.reset_index(drop=True, inplace=True)
         temp_current_year_list = []
         temp_previous_year_list = []
-        for item in data_json[2]["dataList"]:
+        for item in temp_df.to_dict("records"):
             temp_previous_year_list.append(item[temp_df.columns[1]])
             try:
                 temp_current_year_list.append(item[temp_df.columns[2]])

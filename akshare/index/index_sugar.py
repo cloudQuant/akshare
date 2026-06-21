@@ -28,10 +28,10 @@ def index_sugar_msweet() -> pd.DataFrame:
         [pd.DataFrame(data_json["category"]), pd.DataFrame(data_json["data"])], axis=1
     )
     temp_df.columns = ["日期", "综合价格", "原糖价格", "现货价格"]
-    temp_df.loc[3226, ["原糖价格"]] = 12.88  # 数据源错误
     temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
     temp_df["综合价格"] = pd.to_numeric(temp_df["综合价格"], errors="coerce")
     temp_df["原糖价格"] = pd.to_numeric(temp_df["原糖价格"], errors="coerce")
+    temp_df.loc[3226, "原糖价格"] = 12.88  # 数据源错误
     temp_df["现货价格"] = pd.to_numeric(temp_df["现货价格"], errors="coerce")
     return temp_df
 
@@ -64,13 +64,14 @@ def index_inner_quote_sugar_msweet() -> pd.DataFrame:
         "利润MA30",
         "利润MA10",
     ]
-    temp_df.loc[988, ["泰国糖"]] = 4045.2  # 数据源错误
     temp_df["日期"] = temp_df["日期"].str.replace("/", "-")
     temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
     temp_df["利润空间"] = pd.to_numeric(temp_df["利润空间"], errors="coerce")
     temp_df["泰国糖"] = pd.to_numeric(temp_df["泰国糖"], errors="coerce")
+    temp_df.loc[988, "泰国糖"] = 4045.2  # 数据源错误
     temp_df["泰国MA5"] = pd.to_numeric(temp_df["泰国MA5"], errors="coerce")
     temp_df["巴西MA5"] = pd.to_numeric(temp_df["巴西MA5"], errors="coerce")
+    temp_df["利润MA5"] = pd.to_numeric(temp_df["利润MA5"], errors="coerce")
     temp_df["巴西MA10"] = pd.to_numeric(temp_df["巴西MA10"], errors="coerce")
     temp_df["巴西糖"] = pd.to_numeric(temp_df["巴西糖"], errors="coerce")
     temp_df["柳州现货价"] = pd.to_numeric(temp_df["柳州现货价"], errors="coerce")

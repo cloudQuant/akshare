@@ -12,6 +12,48 @@ import requests
 from akshare.utils.cons import headers
 
 
+def _get_xueqiu_session(symbol: str, token: str | None, timeout: float | None):
+    session = requests.Session()
+    request_headers = headers.copy()
+    if token:
+        request_headers["cookie"] = f"xq_a_token={token};"
+    session.get(
+        f"https://xueqiu.com/snowman/S/{symbol}/detail",
+        headers=request_headers,
+        timeout=timeout or 15,
+    )
+    return session, request_headers
+
+
+def _get_xueqiu_company_data(
+    url: str, params: dict, timeout: float | None, token: str | None = None
+):
+    try:
+        session, request_headers = _get_xueqiu_session(params["symbol"], token, timeout)
+        r = session.get(
+            url, params=params, headers=request_headers, timeout=timeout or 15
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Xueqiu company endpoint request failed: {url}") from exc
+    try:
+        data_json = r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Xueqiu company endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
+    if r.status_code != 200:
+        message = data_json.get("error_description", "")
+        raise RuntimeError(
+            f"Xueqiu company endpoint returned HTTP {r.status_code}: {message}"
+        )
+    data = data_json.get("data")
+    if data is None:
+        message = data_json.get("error_description") or data_json.get("error_code")
+        raise RuntimeError(f"Xueqiu company endpoint returned no data: {message}")
+    return data
+
+
 def stock_individual_basic_info_xq(
     symbol: str = "SH601127", token: str = None, timeout: float = None
 ) -> pd.DataFrame:
@@ -27,16 +69,11 @@ def stock_individual_basic_info_xq(
     :return: 公司简介
     :rtype: pandas.DataFrame
     """
-    from akshare.stock.cons import xq_a_token
-    xq_a_token = token or xq_a_token
     url = "https://stock.xueqiu.com/v5/stock/f10/cn/company.json"
     params = {
         "symbol": symbol,
     }
-    headers.update({"cookie": f"xq_a_token={xq_a_token};"})
-    r = requests.get(url, params=params, headers=headers, timeout=timeout)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"])
+    temp_df = pd.DataFrame(_get_xueqiu_company_data(url, params, timeout, token))
     temp_df.reset_index(inplace=True)
     temp_df.columns = ["item", "value"]
     return temp_df
@@ -57,16 +94,11 @@ def stock_individual_basic_info_us_xq(
     :return: 公司简介
     :rtype: pandas.DataFrame
     """
-    from akshare.stock.cons import xq_a_token
-    xq_a_token = token or xq_a_token
     url = "https://stock.xueqiu.com/v5/stock/f10/us/company.json"
     params = {
         "symbol": symbol,
     }
-    headers.update({"cookie": f"xq_a_token={xq_a_token};"})
-    r = requests.get(url, params=params, headers=headers, timeout=timeout)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"])
+    temp_df = pd.DataFrame(_get_xueqiu_company_data(url, params, timeout, token))
     temp_df.reset_index(inplace=True)
     temp_df.columns = ["item", "value"]
     return temp_df
@@ -87,16 +119,11 @@ def stock_individual_basic_info_hk_xq(
     :return: 公司简介
     :rtype: pandas.DataFrame
     """
-    from akshare.stock.cons import xq_a_token
-    xq_a_token = token or xq_a_token
     url = "https://stock.xueqiu.com/v5/stock/f10/hk/company.json"
     params = {
         "symbol": symbol,
     }
-    headers.update({"cookie": f"xq_a_token={xq_a_token};"})
-    r = requests.get(url, params=params, headers=headers, timeout=timeout)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"])
+    temp_df = pd.DataFrame(_get_xueqiu_company_data(url, params, timeout, token))
     temp_df.reset_index(inplace=True)
     temp_df.columns = ["item", "value"]
     return temp_df

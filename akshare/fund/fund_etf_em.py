@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 """
-Date: 2025/2/15 22:00
+Date: 2025/4/27 00:00
 Desc: 东方财富-ETF行情
 https://quote.eastmoney.com/sh513500.html
 """
@@ -12,6 +12,7 @@ import pandas as pd
 import requests
 
 from akshare.utils.func import fetch_paginated_data
+from akshare.utils.request import request_eastmoney
 
 
 @lru_cache()
@@ -48,7 +49,7 @@ def fund_etf_spot_em() -> pd.DataFrame:
     :return: ETF 实时行情
     :rtype: pandas.DataFrame
     """
-    url = "https://88.push2.eastmoney.com/api/qt/clist/get"
+    url = "https://push2delay.eastmoney.com/api/qt/clist/get"
     params = {
         "pn": "1",
         "pz": "100",
@@ -216,21 +217,41 @@ def fund_etf_spot_em() -> pd.DataFrame:
     )
     return temp_df
 
-def get_market_id(symbol: str)-> int:
+
+def get_market_id(symbol: str) -> int:
     """
     东方财富-ETF市场标识判断
     :param symbol: ETF 代码
     :type symbol: str
     :return: ETF 代码和市场标识（1:上证 0:深证）
-    :rtype: int 
+    :rtype: int
     """
-    if symbol.startswith(('0', '1', '3', '2', '5', '6')):
-        if symbol.startswith(('5', '6')):
+    if symbol.startswith(("0", "1", "3", "2", "5", "6")):
+        if symbol.startswith(("5", "6")):
             return 1
         else:
             return 0
     else:
         return 1
+
+
+def _get_eastmoney_fund_json(url: str, params: dict, endpoint_name: str):
+    try:
+        r = request_eastmoney(url, timeout=15, params=params)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Eastmoney {endpoint_name} endpoint request failed: {url}") from exc
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} endpoint returned HTTP {r.status_code}: {url}"
+        )
+    try:
+        return r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Eastmoney {endpoint_name} endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
+
 
 def fund_etf_hist_em(
     symbol: str = "159707",
@@ -272,21 +293,19 @@ def fund_etf_hist_em(
         # market_id = code_id_dict[symbol]
         market_id = get_market_id(symbol)
         params.update({"secid": f"{market_id}.{symbol}"})
-        r = requests.get(url, timeout=150, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_fund_json(url, params, "ETF history")
     except KeyError:
         market_id = 1
         params.update({"secid": f"{market_id}.{symbol}"})
-        r = requests.get(url, timeout=150, params=params)
-        data_json = r.json()
-        if not data_json["data"]:
+        data_json = _get_eastmoney_fund_json(url, params, "ETF history")
+        if not data_json.get("data"):
             market_id = 0
             params.update({"secid": f"{market_id}.{symbol}"})
-            r = requests.get(url, timeout=150, params=params)
-            data_json = r.json()
-    if not (data_json["data"] and data_json["data"]["klines"]):
+            data_json = _get_eastmoney_fund_json(url, params, "ETF history")
+    data = data_json.get("data") or {}
+    if not data.get("klines"):
         return pd.DataFrame()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
+    temp_df = pd.DataFrame([item.split(",") for item in data["klines"]])
     temp_df.columns = [
         "日期",
         "开盘",
@@ -338,7 +357,7 @@ def fund_etf_hist_min_em(
     :return: 每日分时行情
     :rtype: pandas.DataFrame
     """
-    #code_id_dict = _fund_etf_code_id_map_em()
+    # code_id_dict = _fund_etf_code_id_map_em()
     # 商品期货类 ETF
     # code_id_dict.update(
     #     {
@@ -365,10 +384,12 @@ def fund_etf_hist_min_em(
             "iscr": "0",
             "secid": f"{get_market_id(symbol)}.{symbol}",
         }
-        r = requests.get(url, timeout=150, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_fund_json(url, params, "ETF minute history")
+        trends = (data_json.get("data") or {}).get("trends") or []
+        if not trends:
+            return pd.DataFrame()
         temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["trends"]]
+            [item.split(",") for item in trends]
         )
         temp_df.columns = [
             "时间",
@@ -404,10 +425,12 @@ def fund_etf_hist_min_em(
             "beg": "0",
             "end": "20500000",
         }
-        r = requests.get(url, timeout=150, params=params)
-        data_json = r.json()
+        data_json = _get_eastmoney_fund_json(url, params, "ETF minute kline")
+        klines = (data_json.get("data") or {}).get("klines") or []
+        if not klines:
+            return pd.DataFrame()
         temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
+            [item.split(",") for item in klines]
         )
         temp_df.columns = [
             "时间",
@@ -489,7 +512,7 @@ if __name__ == "__main__":
         symbol="511380",
         period="1",
         adjust="",
-        start_date="2025-03-10 09:30:00",
-        end_date="2025-03-10 17:40:00",
+        start_date="2025-04-10 09:30:00",
+        end_date="2025-04-10 17:40:00",
     )
     print(fund_etf_hist_min_em_df)

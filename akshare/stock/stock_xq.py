@@ -1,7 +1,7 @@
 # !/usr/bin/env python
 # -*- coding:utf-8 -*-
 """
-Date: 2025/8/30 15:00
+Date: 2026/1/13 15:00
 Desc: 雪球-行情中心-个股
 https://xueqiu.com/S/SH513520
 """
@@ -43,17 +43,37 @@ def stock_individual_spot_xq(
     :return: 证券最新行情
     :rtype: pandas.DataFrame
     """
-    from akshare.stock.cons import xq_a_token
     session = requests.Session()
-    xq_a_token = token or xq_a_token
     headers = {
-        "cookie": f"xq_a_token={xq_a_token};",
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 "
         "(KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
     }
-    session.get(url="https://xueqiu.com", headers=headers)
+    if token:
+        headers["cookie"] = f"xq_a_token={token};"
+    session.get(
+        url=f"https://xueqiu.com/snowman/S/{symbol}/detail",
+        headers=headers,
+        timeout=timeout or 15,
+    )
     url = f"https://stock.xueqiu.com/v5/stock/quote.json?symbol={symbol}&extend=detail"
-    r = session.get(url, headers=headers, timeout=timeout)
+    try:
+        r = session.get(url, headers=headers, timeout=timeout or 15)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Xueqiu quote endpoint request failed: {url}") from exc
+    try:
+        json_data = r.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Xueqiu quote endpoint returned non-JSON response: {url}; "
+            f"preview={r.text[:120]!r}"
+        ) from exc
+    if r.status_code != 200:
+        message = json_data.get("error_description", "")
+        raise RuntimeError(f"Xueqiu quote endpoint returned HTTP {r.status_code}: {message}")
+    data = json_data.get("data") or {}
+    if "quote" not in data:
+        message = json_data.get("error_description") or json_data.get("error_code")
+        raise RuntimeError(f"Xueqiu quote endpoint returned no quote data: {message}")
     column_name_map = {
         "acc_unit_nav": "累计净值",
         "amount": "成交额",
@@ -100,8 +120,7 @@ def stock_individual_spot_xq(
         "volume": "成交量",
         "time": "时间",
     }
-    json_data = r.json()
-    temp_df = pd.json_normalize(json_data["data"]["quote"])
+    temp_df = pd.json_normalize(data["quote"])
     temp_df.columns = [
         *map(
             lambda x: column_name_map[x] if x in column_name_map.keys() else x,

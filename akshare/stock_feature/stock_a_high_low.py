@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 """
-Date: 2023/9/10 15:32
+Date: 2026/5/20 17:30
 Desc: 乐咕乐股-创新高、新低的股票数量
 https://www.legulegu.com/stockdata/high-low-statistics
 """
@@ -26,7 +26,7 @@ def stock_a_high_low_statistics(symbol: str = "all") -> pd.DataFrame:
     data_json = r.json()
     temp_df = pd.DataFrame(data_json)
     del temp_df["indexCode"]
-    temp_df["date"] = pd.to_datetime(temp_df["date"], unit="ms").dt.date
+    temp_df["date"] = pd.to_datetime(temp_df["date"], errors="coerce").dt.date
     temp_df["close"] = pd.to_numeric(temp_df["close"], errors="coerce")
     temp_df["high20"] = pd.to_numeric(temp_df["high20"], errors="coerce")
     temp_df["low20"] = pd.to_numeric(temp_df["low20"], errors="coerce")

@@ -897,15 +897,21 @@ def option_minute_em(symbol: str = "MO2404-P-4450") -> pd.DataFrame:
     :return: 指定期权的分钟频率数据
     :rtype: pandas.DataFrame
     """
+    columns = ["time", "close", "high", "low", "volume", "amount"]
     inner_option_current_em_df = __option_current_em()
+    if inner_option_current_em_df.empty:
+        return pd.DataFrame(columns=columns)
     inner_option_current_em_df["标识"] = (
         inner_option_current_em_df["市场标识"].astype(str)
         + "."
-        + inner_option_current_em_df["代码"]
+        + inner_option_current_em_df["代码"].astype(str)
     )
-    id_ = inner_option_current_em_df[inner_option_current_em_df["代码"] == symbol][
-        "标识"
-    ].values[0]
+    matched_df = inner_option_current_em_df[
+        inner_option_current_em_df["代码"].astype(str) == str(symbol)
+    ]
+    if matched_df.empty:
+        return pd.DataFrame(columns=columns)
+    id_ = matched_df["标识"].values[0]
     url = "https://push2.eastmoney.com/api/qt/stock/trends2/get"
     params = {
         "secid": id_,
@@ -917,12 +923,15 @@ def option_minute_em(symbol: str = "MO2404-P-4450") -> pd.DataFrame:
         "ndays": "1",
         "cb": "quotepushdata1",
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_text = r.text
     data_json = json.loads(data_text[data_text.find("(") + 1 : data_text.rfind(")")])
+    if not data_json.get("data") or not data_json["data"].get("trends"):
+        return pd.DataFrame(columns=columns)
     temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["trends"]])
     temp_df.columns = ["time", "close", "high", "low", "volume", "amount", "-"]
-    temp_df = temp_df[["time", "close", "high", "low", "volume", "amount"]]
+    temp_df = temp_df[columns]
     temp_df["close"] = pd.to_numeric(temp_df["close"], errors="coerce")
     temp_df["high"] = pd.to_numeric(temp_df["high"], errors="coerce")
     temp_df["low"] = pd.to_numeric(temp_df["low"], errors="coerce")

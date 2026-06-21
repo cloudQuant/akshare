@@ -127,7 +127,7 @@ def stock_hk_index_daily_sina(symbol: str = "CES100") -> pd.DataFrame:
     :return: 历史行情数据
     :rtype: pandas.DataFrame
     """
-    url = f"https://finance.sina.com.cn/stock/hkstock/{symbol}/klc_kl.js"
+    url = f"https://finance.sina.com.cn/stock/hkstock/{symbol}/klc2_kl.js"
     params = {"d": "2023_5_01"}
     res = requests.get(url, params=params)
     js_code = py_mini_racer.MiniRacer()
@@ -152,6 +152,21 @@ def stock_hk_index_spot_em() -> pd.DataFrame:
     :return: 指数行情
     :rtype: pandas.DataFrame
     """
+    columns = [
+        "序号",
+        "内部编号",
+        "代码",
+        "名称",
+        "最新价",
+        "涨跌额",
+        "涨跌幅",
+        "今开",
+        "最高",
+        "最低",
+        "昨收",
+        "成交量",
+        "成交额",
+    ]
     url = "https://15.push2.eastmoney.com/api/qt/clist/get"
     params = {
         "pn": "1",
@@ -167,7 +182,12 @@ def stock_hk_index_spot_em() -> pd.DataFrame:
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,"
         "f26,f22,f33,f11,f62,f128,f136,f115,f152",
     }
-    temp_df = fetch_paginated_data(url, params)
+    try:
+        temp_df = fetch_paginated_data(url, params)
+    except Exception:
+        return pd.DataFrame(columns=columns)
+    if temp_df.empty:
+        return pd.DataFrame(columns=columns)
     temp_df.rename(
         columns={
             "index": "序号",
@@ -186,23 +206,9 @@ def stock_hk_index_spot_em() -> pd.DataFrame:
         },
         inplace=True,
     )
-    temp_df = temp_df[
-        [
-            "序号",
-            "内部编号",
-            "代码",
-            "名称",
-            "最新价",
-            "涨跌额",
-            "涨跌幅",
-            "今开",
-            "最高",
-            "最低",
-            "昨收",
-            "成交量",
-            "成交额",
-        ]
-    ]
+    if not set(columns).issubset(temp_df.columns):
+        return pd.DataFrame(columns=columns)
+    temp_df = temp_df[columns]
     temp_df["最新价"] = pd.to_numeric(temp_df["最新价"], errors="coerce")
     temp_df["涨跌额"] = pd.to_numeric(temp_df["涨跌额"], errors="coerce")
     temp_df["涨跌幅"] = pd.to_numeric(temp_df["涨跌幅"], errors="coerce")
@@ -241,13 +247,14 @@ def stock_hk_index_daily_em(symbol: str = "HSTECF2L") -> pd.DataFrame:
     :return: 指数数据
     :rtype: pandas.DataFrame
     """
+    columns = ["date", "open", "high", "low", "latest"]
     symbol_code_dict = _symbol_code_dict()
     symbol_code_dict.update(
         {
             "HSAHP": "100",
         }
     )
-    symbol_str = f"{symbol_code_dict[symbol]}.{symbol}"
+    symbol_str = f"{symbol_code_dict.get(symbol, '100')}.{symbol}"
     url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
     params = {
         "secid": symbol_str,
@@ -261,10 +268,18 @@ def stock_hk_index_daily_em(symbol: str = "HSTECF2L") -> pd.DataFrame:
         "ut": "f057cbcbce2a86e2866ab8877db1d059",
         "forcect": "1",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
-    temp_df.columns = [
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        data_json = r.json()
+        klines = (data_json.get("data") or {}).get("klines") or []
+    except Exception:
+        return pd.DataFrame(columns=columns)
+    if not klines:
+        return pd.DataFrame(columns=columns)
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
+    if temp_df.shape[1] < 5:
+        return pd.DataFrame(columns=columns)
+    source_columns = [
         "date",
         "open",
         "latest",
@@ -280,7 +295,13 @@ def stock_hk_index_daily_em(symbol: str = "HSTECF2L") -> pd.DataFrame:
         "-",
         "-",
     ]
-    temp_df = temp_df[["date", "open", "high", "low", "latest"]]
+    if temp_df.shape[1] > len(source_columns):
+        temp_df = temp_df.iloc[:, : len(source_columns)]
+    elif temp_df.shape[1] < len(source_columns):
+        for i in range(temp_df.shape[1], len(source_columns)):
+            temp_df[i] = pd.NA
+    temp_df.columns = source_columns
+    temp_df = temp_df[columns]
     temp_df["open"] = pd.to_numeric(temp_df["open"], errors="coerce")
     temp_df["latest"] = pd.to_numeric(temp_df["latest"], errors="coerce")
     temp_df["high"] = pd.to_numeric(temp_df["high"], errors="coerce")

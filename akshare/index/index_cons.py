@@ -17,6 +17,33 @@ from bs4 import BeautifulSoup
 from akshare.utils import demjson
 
 
+_INDEX_STOCK_CONS_WEIGHT_CSINDEX_COLUMNS = [
+    "日期",
+    "指数代码",
+    "指数名称",
+    "指数英文名称",
+    "成分券代码",
+    "成分券名称",
+    "成分券英文名称",
+    "交易所",
+    "交易所英文名称",
+    "权重",
+]
+
+
+def _empty_index_stock_cons_weight_csindex() -> pd.DataFrame:
+    return pd.DataFrame(columns=_INDEX_STOCK_CONS_WEIGHT_CSINDEX_COLUMNS)
+
+
+def _format_csindex_code(value, width: int = 6):
+    if pd.isna(value):
+        return None
+    value_str = str(value).strip()
+    if value_str.endswith(".0"):
+        value_str = value_str[:-2]
+    return value_str.zfill(width) if value_str else None
+
+
 def index_stock_cons_sina(symbol: str = "000300") -> pd.DataFrame:
     """
     新浪新版股票指数成份页面, 目前该接口可获取指数数量较少
@@ -170,27 +197,109 @@ def index_stock_cons_weight_csindex(symbol: str = "000300") -> pd.DataFrame:
         f"https://oss-ch.csindex.com.cn/static/html/csindex/"
         f"public/uploads/file/autofile/closeweight/{symbol}closeweight.xls"
     )
-    r = requests.get(url)
-    temp_df = pd.read_excel(BytesIO(r.content))
-    temp_df.columns = [
-        "日期",
-        "指数代码",
-        "指数名称",
-        "指数英文名称",
-        "成分券代码",
-        "成分券名称",
-        "成分券英文名称",
-        "交易所",
-        "交易所英文名称",
-        "权重",
-    ]
+    try:
+        r = requests.get(url, timeout=15)
+    except requests.RequestException:
+        return _empty_index_stock_cons_weight_csindex()
+
+    if r.status_code != 200:
+        return _empty_index_stock_cons_weight_csindex()
+
+    try:
+        temp_df = pd.read_excel(BytesIO(r.content))
+    except (ValueError, OSError):
+        return _empty_index_stock_cons_weight_csindex()
+
+    if temp_df.empty:
+        return _empty_index_stock_cons_weight_csindex()
+
+    if len(temp_df.columns) == 13:
+        temp_df.columns = [
+            "日期",
+            "指数代码",
+            "指数名称",
+            "指数英文名称",
+            "成分券名称",
+            "成分券英文名称",
+            "沪市代码",
+            "沪市名称",
+            "深市代码",
+            "深市名称",
+            "银行间代码",
+            "银行间名称",
+            "权重",
+        ]
+
+        def choose_component(row):
+            exchange_options = [
+                ("沪市代码", "沪市名称", "上海证券交易所", "Shanghai Stock Exchange"),
+                ("深市代码", "深市名称", "深圳证券交易所", "Shenzhen Stock Exchange"),
+                ("银行间代码", "银行间名称", "银行间市场", "Inter-Bank Market"),
+            ]
+            for code_column, name_column, exchange, exchange_en in exchange_options:
+                code = _format_csindex_code(row.get(code_column))
+                if code:
+                    return pd.Series(
+                        {
+                            "成分券代码": code,
+                            "成分券名称": row.get(name_column) or row.get("成分券名称"),
+                            "交易所": exchange,
+                            "交易所英文名称": exchange_en,
+                        }
+                    )
+            return pd.Series(
+                {
+                    "成分券代码": None,
+                    "成分券名称": row.get("成分券名称"),
+                    "交易所": None,
+                    "交易所英文名称": None,
+                }
+            )
+
+        component_df = temp_df.apply(choose_component, axis=1)
+        temp_df = pd.concat(
+            [
+                temp_df[
+                    [
+                        "日期",
+                        "指数代码",
+                        "指数名称",
+                        "指数英文名称",
+                        "成分券英文名称",
+                        "权重",
+                    ]
+                ],
+                component_df,
+            ],
+            axis=1,
+        )
+        temp_df = temp_df[
+            [
+                "日期",
+                "指数代码",
+                "指数名称",
+                "指数英文名称",
+                "成分券代码",
+                "成分券名称",
+                "成分券英文名称",
+                "交易所",
+                "交易所英文名称",
+                "权重",
+            ]
+        ]
+    elif len(temp_df.columns) >= len(_INDEX_STOCK_CONS_WEIGHT_CSINDEX_COLUMNS):
+        temp_df = temp_df.iloc[:, : len(_INDEX_STOCK_CONS_WEIGHT_CSINDEX_COLUMNS)]
+        temp_df.columns = _INDEX_STOCK_CONS_WEIGHT_CSINDEX_COLUMNS
+    else:
+        return _empty_index_stock_cons_weight_csindex()
+
     temp_df["日期"] = pd.to_datetime(
         temp_df["日期"], format="%Y%m%d", errors="coerce"
     ).dt.date
-    temp_df["指数代码"] = temp_df["指数代码"].astype(str).str.zfill(6)
-    temp_df["成分券代码"] = temp_df["成分券代码"].astype(str).str.zfill(6)
+    temp_df["指数代码"] = temp_df["指数代码"].apply(_format_csindex_code)
+    temp_df["成分券代码"] = temp_df["成分券代码"].apply(_format_csindex_code)
     temp_df["权重"] = pd.to_numeric(temp_df["权重"], errors="coerce")
-    return temp_df
+    return temp_df[_INDEX_STOCK_CONS_WEIGHT_CSINDEX_COLUMNS]
 
 
 def stock_a_code_to_symbol(symbol: str = "000300") -> str:

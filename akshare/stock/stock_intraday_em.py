@@ -15,6 +15,8 @@ import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.ssl_ import create_urllib3_context
 
+from akshare.utils.request import request_eastmoney
+
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -37,7 +39,7 @@ def _get_ssl_session():
 
 def __event_stream(url, params):
     # 使用 stream=True 参数来启用流式请求
-    response = requests.get(url, params=params, stream=True)
+    response = request_eastmoney(url, params=params, stream=True, timeout=15)
     event_data = ""
 
     for line in response.iter_lines():

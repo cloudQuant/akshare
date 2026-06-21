@@ -167,7 +167,7 @@ def stock_gpzy_pledge_ratio_em(date: str = "20240906") -> pd.DataFrame:
     return big_df
 
 
-def _get_page_num_gpzy_market_pledge_ratio_detail() -> int:
+def _get_page_num_gpzy_market_pledge_ratio_detail(filter: str = None) -> int:
     """
     东方财富网-数据中心-特色数据-股权质押-重要股东股权质押明细
     https://data.eastmoney.com/gpzy/pledgeDetail.aspx
@@ -184,21 +184,29 @@ def _get_page_num_gpzy_market_pledge_ratio_detail() -> int:
         "quoteColumns": "",
         "source": "WEB",
         "client": "WEB",
+        "filter": filter,
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    total_page = math.ceil(int(data_json["result"]["count"]) / 500)
+    result = data_json.get("result") or {}
+    total_page = math.ceil(int(result.get("count") or 0) / 500)
     return total_page
 
 
-def stock_gpzy_pledge_ratio_detail_em() -> pd.DataFrame:
+def _stock_gpzy_pledge_ratio_detail_em(
+    filter: str = None,
+    max_pages: int = None,
+) -> pd.DataFrame:
     """
     东方财富网-数据中心-特色数据-股权质押-重要股东股权质押明细
     https://data.eastmoney.com/gpzy/pledgeDetail.aspx
     :return: pandas.DataFrame
     """
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    total_page = _get_page_num_gpzy_market_pledge_ratio_detail()
+    total_page = _get_page_num_gpzy_market_pledge_ratio_detail(filter)
+    if max_pages is not None:
+        total_page = min(total_page, int(max_pages))
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
     for page in tqdm(range(1, total_page + 1), leave=False):
@@ -212,11 +220,35 @@ def stock_gpzy_pledge_ratio_detail_em() -> pd.DataFrame:
             "quoteColumns": "",
             "source": "WEB",
             "client": "WEB",
+            "filter": filter,
         }
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
         data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"]["data"])
+        records = (data_json.get("result") or {}).get("data") or []
+        if not records:
+            continue
+        temp_df = pd.DataFrame(records)
         big_df = pd.concat(objs=[big_df, temp_df], ignore_index=True)
+    output_columns = [
+        "序号",
+        "股票代码",
+        "股票简称",
+        "股东名称",
+        "质押股份数量",
+        "占所持股份比例",
+        "占总股本比例",
+        "质押机构",
+        "最新价",
+        "质押日收盘价",
+        "预估平仓线",
+        "质押开始日期",
+        "质押结束日期",
+        "状态",
+        "公告日期",
+    ]
+    if big_df.empty:
+        return pd.DataFrame(columns=output_columns)
     big_df.reset_index(inplace=True)
     big_df["index"] = big_df.index + 1
     big_df.columns = [
@@ -235,8 +267,8 @@ def stock_gpzy_pledge_ratio_detail_em() -> pd.DataFrame:
         "占总股本比例",
         "质押日收盘价",
         "质押开始日期",
-        "_",
-        "_",
+        "质押结束日期",
+        "状态",
         "_",
         "_",
         "_",
@@ -263,23 +295,7 @@ def stock_gpzy_pledge_ratio_detail_em() -> pd.DataFrame:
         "_",
         "_",
     ]
-    big_df = big_df[
-        [
-            "序号",
-            "股票代码",
-            "股票简称",
-            "股东名称",
-            "质押股份数量",
-            "占所持股份比例",
-            "占总股本比例",
-            "质押机构",
-            "最新价",
-            "质押日收盘价",
-            "预估平仓线",
-            "质押开始日期",
-            "公告日期",
-        ]
-    ]
+    big_df = big_df[output_columns]
 
     big_df["质押股份数量"] = pd.to_numeric(big_df["质押股份数量"], errors="coerce")
     big_df["占所持股份比例"] = pd.to_numeric(big_df["占所持股份比例"], errors="coerce")
@@ -291,7 +307,18 @@ def stock_gpzy_pledge_ratio_detail_em() -> pd.DataFrame:
     big_df["质押开始日期"] = pd.to_datetime(
         big_df["质押开始日期"], errors="coerce"
     ).dt.date
+    big_df["质押结束日期"] = pd.to_datetime(
+        big_df["质押结束日期"], errors="coerce"
+    ).dt.date
     return big_df
+
+
+def stock_gpzy_pledge_ratio_detail_em(max_pages: int = None) -> pd.DataFrame:
+    return _stock_gpzy_pledge_ratio_detail_em(max_pages=max_pages)
+
+
+def stock_gpzy_individual_pledge_ratio_detail_em(symbol: str) -> pd.DataFrame:
+    return _stock_gpzy_pledge_ratio_detail_em(filter=f'(SECURITY_CODE="{symbol}")')
 
 
 def stock_gpzy_distribute_statistics_company_em() -> pd.DataFrame:
@@ -314,9 +341,13 @@ def stock_gpzy_distribute_statistics_company_em() -> pd.DataFrame:
         "client": "WEB",
         "filter": '(PFORG_TYPE="证券")',
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
     data_json = r.json()
-    temp_df = pd.DataFrame(data_json["result"]["data"])
+    records = (data_json.get("result") or {}).get("data") or []
+    if not records:
+        return pd.DataFrame()
+    temp_df = pd.DataFrame(records)
     temp_df.reset_index(inplace=True)
     temp_df["index"] = temp_df.index + 1
     temp_df.columns = [
@@ -370,6 +401,16 @@ def stock_gpzy_distribute_statistics_bank_em() -> pd.DataFrame:
     :return: 质押机构分布统计-银行
     :rtype: pandas.DataFrame
     """
+    output_columns = [
+        "序号",
+        "质押机构",
+        "质押公司数量",
+        "质押笔数",
+        "质押数量",
+        "未达预警线比例",
+        "达到预警线未达平仓线比例",
+        "达到平仓线比例",
+    ]
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
     params = {
         "sortColumns": "ORG_NUM",
@@ -385,7 +426,10 @@ def stock_gpzy_distribute_statistics_bank_em() -> pd.DataFrame:
     }
     r = requests.get(url, params=params)
     data_json = r.json()
-    temp_df = pd.DataFrame(data_json["result"]["data"])
+    records = (data_json.get("result") or {}).get("data") or []
+    if not records:
+        return pd.DataFrame(columns=output_columns)
+    temp_df = pd.DataFrame(records)
     temp_df.reset_index(inplace=True)
     temp_df["index"] = temp_df.index + 1
     temp_df.columns = [
@@ -405,18 +449,7 @@ def stock_gpzy_distribute_statistics_bank_em() -> pd.DataFrame:
         "_",
         "_",
     ]
-    temp_df = temp_df[
-        [
-            "序号",
-            "质押机构",
-            "质押公司数量",
-            "质押笔数",
-            "质押数量",
-            "未达预警线比例",
-            "达到预警线未达平仓线比例",
-            "达到平仓线比例",
-        ]
-    ]
+    temp_df = temp_df[output_columns]
     temp_df["质押公司数量"] = pd.to_numeric(temp_df["质押公司数量"], errors="coerce")
     temp_df["质押笔数"] = pd.to_numeric(temp_df["质押笔数"], errors="coerce")
     temp_df["质押数量"] = pd.to_numeric(temp_df["质押数量"], errors="coerce")
@@ -497,6 +530,11 @@ if __name__ == "__main__":
 
     stock_gpzy_pledge_ratio_detail_em_df = stock_gpzy_pledge_ratio_detail_em()
     print(stock_gpzy_pledge_ratio_detail_em_df)
+
+    stock_gpzy_individual_pledge_ratio_detail_em_df = (
+        stock_gpzy_individual_pledge_ratio_detail_em(symbol="603132")
+    )
+    print(stock_gpzy_individual_pledge_ratio_detail_em_df)
 
     stock_em_gpzy_distribute_statistics_company_df = (
         stock_gpzy_distribute_statistics_company_em()

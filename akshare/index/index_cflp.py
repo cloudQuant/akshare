@@ -9,6 +9,34 @@ http://index.0256.cn/expx.htm
 import pandas as pd
 import requests
 
+_CFLP_COLUMNS = ["日期", "定基指数", "环比指数", "同比指数"]
+
+
+def _empty_cflp_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=_CFLP_COLUMNS)
+
+
+def _format_cflp_df(data_json: dict) -> pd.DataFrame:
+    try:
+        temp_df = pd.DataFrame(
+            [
+                data_json["chart1"]["xLebal"],
+                data_json["chart1"]["yLebal"],
+                data_json["chart2"]["yLebal"],
+                data_json["chart3"]["yLebal"],
+            ]
+        ).T
+    except Exception:
+        return _empty_cflp_df()
+    if temp_df.empty:
+        return _empty_cflp_df()
+    temp_df.columns = _CFLP_COLUMNS
+    temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
+    temp_df["定基指数"] = pd.to_numeric(temp_df["定基指数"], errors="coerce")
+    temp_df["环比指数"] = pd.to_numeric(temp_df["环比指数"], errors="coerce")
+    temp_df["同比指数"] = pd.to_numeric(temp_df["同比指数"], errors="coerce")
+    return temp_df
+
 
 def index_price_cflp(symbol: str = "周指数") -> pd.DataFrame:
     """
@@ -25,6 +53,8 @@ def index_price_cflp(symbol: str = "周指数") -> pd.DataFrame:
         "季度指数": "4",
         "年度指数": "5",
     }
+    if symbol not in symbol_map:
+        return _empty_cflp_df()
     url = "http://index.0256.cn/expcenter_trend.action"
     params = {
         "marketId": "1",
@@ -42,22 +72,12 @@ def index_price_cflp(symbol: str = "周指数") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/90.0.4430.212 Safari/537.36",
     }
-    r = requests.post(url, data=params, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(
-        [
-            data_json["chart1"]["xLebal"],
-            data_json["chart1"]["yLebal"],
-            data_json["chart2"]["yLebal"],
-            data_json["chart3"]["yLebal"],
-        ]
-    ).T
-    temp_df.columns = ["日期", "定基指数", "环比指数", "同比指数"]
-    temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
-    temp_df["定基指数"] = pd.to_numeric(temp_df["定基指数"], errors="coerce")
-    temp_df["环比指数"] = pd.to_numeric(temp_df["环比指数"], errors="coerce")
-    temp_df["同比指数"] = pd.to_numeric(temp_df["同比指数"], errors="coerce")
-    return temp_df
+    try:
+        r = requests.post(url, data=params, headers=headers, timeout=15)
+        data_json = r.json()
+    except Exception:
+        return _empty_cflp_df()
+    return _format_cflp_df(data_json)
 
 
 def index_volume_cflp(symbol: str = "月指数") -> pd.DataFrame:
@@ -74,6 +94,8 @@ def index_volume_cflp(symbol: str = "月指数") -> pd.DataFrame:
         "季度指数": "4",
         "年度指数": "5",
     }
+    if symbol not in symbol_map:
+        return _empty_cflp_df()
     url = "http://index.0256.cn/volume_query.action"
     params = {
         "type": "1",
@@ -91,22 +113,12 @@ def index_volume_cflp(symbol: str = "月指数") -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/90.0.4430.212 Safari/537.36",
     }
-    r = requests.post(url, data=params, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(
-        [
-            data_json["chart1"]["xLebal"],
-            data_json["chart1"]["yLebal"],
-            data_json["chart2"]["yLebal"],
-            data_json["chart3"]["yLebal"],
-        ]
-    ).T
-    temp_df.columns = ["日期", "定基指数", "环比指数", "同比指数"]
-    temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
-    temp_df["定基指数"] = pd.to_numeric(temp_df["定基指数"], errors="coerce")
-    temp_df["环比指数"] = pd.to_numeric(temp_df["环比指数"], errors="coerce")
-    temp_df["同比指数"] = pd.to_numeric(temp_df["同比指数"], errors="coerce")
-    return temp_df
+    try:
+        r = requests.post(url, data=params, headers=headers, timeout=15)
+        data_json = r.json()
+    except Exception:
+        return _empty_cflp_df()
+    return _format_cflp_df(data_json)
 
 
 if __name__ == "__main__":

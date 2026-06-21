@@ -34,7 +34,12 @@ def index_code_id_map_em() -> dict:
         "fs": "b:MK0010,m:1+t:1,m:0 t:5,m:1+s:3,m:0+t:5,m:2",
         "fields": "f3,f12,f13",
     }
-    temp_df = fetch_paginated_data(url, params)
+    try:
+        temp_df = fetch_paginated_data(url, params)
+    except Exception:
+        return {}
+    if temp_df.empty or not {"f12", "f13"}.issubset(temp_df.columns):
+        return {}
     code_id_dict = dict(zip(temp_df["f12"], temp_df["f13"]))
     return code_id_dict
 
@@ -59,94 +64,7 @@ def index_zh_a_hist(
     :return: 行情数据
     :rtype: pandas.DataFrame
     """
-    code_id_dict = index_code_id_map_em()
-    period_dict = {"daily": "101", "weekly": "102", "monthly": "103"}
-    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-    try:
-        params = {
-            "secid": f"{code_id_dict[symbol]}.{symbol}",
-            "ut": "7eea3edcaed734bea9cbfc24409ed989",
-            "fields1": "f1,f2,f3,f4,f5,f6",
-            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-            "klt": period_dict[period],
-            "fqt": "0",
-            "beg": "0",
-            "end": "20500000",
-        }
-    except KeyError:
-        params = {
-            "secid": f"1.{symbol}",
-            "ut": "7eea3edcaed734bea9cbfc24409ed989",
-            "fields1": "f1,f2,f3,f4,f5,f6",
-            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-            "klt": period_dict[period],
-            "fqt": "0",
-            "beg": "0",
-            "end": "20500000",
-        }
-        r = requests.get(url, params=params)
-        data_json = r.json()
-        if data_json["data"] is None:
-            params = {
-                "secid": f"0.{symbol}",
-                "ut": "7eea3edcaed734bea9cbfc24409ed989",
-                "fields1": "f1,f2,f3,f4,f5,f6",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-                "klt": period_dict[period],
-                "fqt": "0",
-                "beg": "0",
-                "end": "20500000",
-            }
-            r = requests.get(url, params=params)
-            data_json = r.json()
-            if data_json["data"] is None:
-                params = {
-                    "secid": f"2.{symbol}",
-                    "ut": "7eea3edcaed734bea9cbfc24409ed989",
-                    "fields1": "f1,f2,f3,f4,f5,f6",
-                    "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-                    "klt": period_dict[period],
-                    "fqt": "0",
-                    "beg": "0",
-                    "end": "20500000",
-                }
-                r = requests.get(url, params=params)
-                data_json = r.json()
-                if data_json["data"] is None:
-                    params = {
-                        "secid": f"47.{symbol}",
-                        "ut": "7eea3edcaed734bea9cbfc24409ed989",
-                        "fields1": "f1,f2,f3,f4,f5,f6",
-                        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-                        "klt": period_dict[period],
-                        "fqt": "0",
-                        "beg": "0",
-                        "end": "20500000",
-                    }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    try:
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
-        )
-    except:  # noqa: E722
-        # 兼容 000859(中证国企一路一带) 和 000861(中证央企创新)
-        params = {
-            "secid": f"2.{symbol}",
-            "ut": "7eea3edcaed734bea9cbfc24409ed989",
-            "fields1": "f1,f2,f3,f4,f5,f6",
-            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-            "klt": period_dict[period],
-            "fqt": "0",
-            "beg": "0",
-            "end": "20500000",
-        }
-        r = requests.get(url, params=params)
-        data_json = r.json()
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
-        )
-    temp_df.columns = [
+    columns = [
         "日期",
         "开盘",
         "收盘",
@@ -159,6 +77,47 @@ def index_zh_a_hist(
         "涨跌额",
         "换手率",
     ]
+    code_id_dict = index_code_id_map_em()
+    period_dict = {"daily": "101", "weekly": "102", "monthly": "103"}
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    if period not in period_dict:
+        return pd.DataFrame(columns=columns)
+
+    candidate_secids = []
+    if symbol in code_id_dict:
+        candidate_secids.append(f"{code_id_dict[symbol]}.{symbol}")
+    candidate_secids.extend([f"{market}.{symbol}" for market in ["1", "0", "2", "47"]])
+    candidate_secids = list(dict.fromkeys(candidate_secids))
+
+    data_json = None
+    for secid in candidate_secids:
+        params = {
+            "secid": secid,
+            "ut": "7eea3edcaed734bea9cbfc24409ed989",
+            "fields1": "f1,f2,f3,f4,f5,f6",
+            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+            "klt": period_dict[period],
+            "fqt": "0",
+            "beg": "0",
+            "end": "20500000",
+        }
+        try:
+            r = requests.get(url, params=params, timeout=15)
+            r.raise_for_status()
+            candidate_json = r.json()
+        except (requests.RequestException, ValueError):
+            continue
+        if (candidate_json.get("data") or {}).get("klines"):
+            data_json = candidate_json
+            break
+
+    if data_json is None:
+        return pd.DataFrame(columns=columns)
+
+    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
+    if temp_df.empty:
+        return pd.DataFrame(columns=columns)
+    temp_df.columns = columns
     temp_df.index = pd.to_datetime(temp_df["日期"], errors="coerce")
     temp_df = temp_df[start_date:end_date]
     temp_df.reset_index(inplace=True, drop=True)
@@ -196,59 +155,41 @@ def index_zh_a_hist_min_em(
     :rtype: pandas.DataFrame
     """
     code_id_dict = index_code_id_map_em()
+    candidate_secids = []
+    if symbol in code_id_dict:
+        candidate_secids.append(f"{code_id_dict[symbol]}.{symbol}")
+    candidate_secids.extend([f"{market}.{symbol}" for market in ["1", "0", "2", "47"]])
+    candidate_secids = list(dict.fromkeys(candidate_secids))
+
     if period == "1":
         url = "https://push2his.eastmoney.com/api/qt/stock/trends2/get"
-        try:
+        columns = ["时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "均价"]
+        data_json = None
+        for secid in candidate_secids:
             params = {
                 "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
                 "fields2": "f51,f52,f53,f54,f55,f56,f57,f58",
                 "iscr": "0",
                 "ndays": "5",
-                "secid": f"{code_id_dict[symbol]}.{symbol}",
+                "secid": secid,
             }
-        except KeyError:
-            params = {
-                "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58",
-                "iscr": "0",
-                "ndays": "5",
-                "secid": f"1.{symbol}",
-            }
-            r = requests.get(url, params=params)
-            data_json = r.json()
-            if data_json["data"] is None:
-                params = {
-                    "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
-                    "fields2": "f51,f52,f53,f54,f55,f56,f57,f58",
-                    "iscr": "0",
-                    "ndays": "5",
-                    "secid": f"0.{symbol}",
-                }
-                r = requests.get(url, params=params)
-                data_json = r.json()
-                if data_json["data"] is None:
-                    params = {
-                        "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
-                        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58",
-                        "iscr": "0",
-                        "ndays": "5",
-                        "secid": f"47.{symbol}",
-                    }
-        r = requests.get(url, params=params)
-        data_json = r.json()
+            try:
+                r = requests.get(url, params=params, timeout=15)
+                r.raise_for_status()
+                candidate_json = r.json()
+            except (requests.RequestException, ValueError):
+                continue
+            if (candidate_json.get("data") or {}).get("trends"):
+                data_json = candidate_json
+                break
+        if data_json is None:
+            return pd.DataFrame(columns=columns)
         temp_df = pd.DataFrame(
             [item.split(",") for item in data_json["data"]["trends"]]
         )
-        temp_df.columns = [
-            "时间",
-            "开盘",
-            "收盘",
-            "最高",
-            "最低",
-            "成交量",
-            "成交额",
-            "均价",
-        ]
+        if temp_df.empty:
+            return pd.DataFrame(columns=columns)
+        temp_df.columns = columns
         temp_df.index = pd.to_datetime(temp_df["时间"], errors="coerce")
         temp_df = temp_df[start_date:end_date]
         temp_df.reset_index(drop=True, inplace=True)
@@ -263,60 +204,7 @@ def index_zh_a_hist_min_em(
         return temp_df
     else:
         url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-        try:
-            params = {
-                "secid": f"{code_id_dict[symbol]}.{symbol}",
-                "ut": "7eea3edcaed734bea9cbfc24409ed989",
-                "fields1": "f1,f2,f3,f4,f5,f6",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-                "klt": period,
-                "fqt": "1",
-                "beg": "0",
-                "end": "20500000",
-            }
-        except:  # noqa: E722
-            params = {
-                "secid": f"0.{symbol}",
-                "ut": "7eea3edcaed734bea9cbfc24409ed989",
-                "fields1": "f1,f2,f3,f4,f5,f6",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-                "klt": period,
-                "fqt": "1",
-                "beg": "0",
-                "end": "20500000",
-            }
-            r = requests.get(url, params=params)
-            data_json = r.json()
-            if data_json["data"] is None:
-                params = {
-                    "secid": f"1.{symbol}",
-                    "ut": "7eea3edcaed734bea9cbfc24409ed989",
-                    "fields1": "f1,f2,f3,f4,f5,f6",
-                    "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-                    "klt": period,
-                    "fqt": "1",
-                    "beg": "0",
-                    "end": "20500000",
-                }
-                r = requests.get(url, params=params)
-                data_json = r.json()
-                if data_json["data"] is None:
-                    params = {
-                        "secid": f"47.{symbol}",
-                        "ut": "7eea3edcaed734bea9cbfc24409ed989",
-                        "fields1": "f1,f2,f3,f4,f5,f6",
-                        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-                        "klt": period,
-                        "fqt": "1",
-                        "beg": "0",
-                        "end": "20500000",
-                    }
-        r = requests.get(url, params=params)
-        data_json = r.json()
-        temp_df = pd.DataFrame(
-            [item.split(",") for item in data_json["data"]["klines"]]
-        )
-        temp_df.columns = [
+        columns = [
             "时间",
             "开盘",
             "收盘",
@@ -329,6 +217,35 @@ def index_zh_a_hist_min_em(
             "涨跌额",
             "换手率",
         ]
+        data_json = None
+        for secid in candidate_secids:
+            params = {
+                "secid": secid,
+                "ut": "7eea3edcaed734bea9cbfc24409ed989",
+                "fields1": "f1,f2,f3,f4,f5,f6",
+                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+                "klt": period,
+                "fqt": "1",
+                "beg": "0",
+                "end": "20500000",
+            }
+            try:
+                r = requests.get(url, params=params, timeout=15)
+                r.raise_for_status()
+                candidate_json = r.json()
+            except (requests.RequestException, ValueError):
+                continue
+            if (candidate_json.get("data") or {}).get("klines"):
+                data_json = candidate_json
+                break
+        if data_json is None:
+            return pd.DataFrame(columns=columns)
+        temp_df = pd.DataFrame(
+            [item.split(",") for item in data_json["data"]["klines"]]
+        )
+        if temp_df.empty:
+            return pd.DataFrame(columns=columns)
+        temp_df.columns = columns
         temp_df.index = pd.to_datetime(temp_df["时间"], errors="coerce")
         temp_df = temp_df[start_date:end_date]
         temp_df.reset_index(drop=True, inplace=True)

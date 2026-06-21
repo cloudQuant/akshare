@@ -62,6 +62,32 @@ def decrypt(origin_data: str = "") -> str:
     return data
 
 
+def _post_endata_artist_json(url: str, payload: dict) -> dict:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.endata.com.cn/Marketing/Artist/business.html",
+        "Origin": "https://www.endata.com.cn",
+    }
+    try:
+        r = requests.post(url, data=payload, headers=headers, timeout=15)
+    except requests.RequestException:
+        return {}
+    r.encoding = "utf8"
+    if r.status_code != 200:
+        return {}
+    try:
+        return json.loads(decrypt(r.text))
+    except ValueError:
+        return {}
+
+
+def _endata_artist_table(data_json: dict) -> list:
+    return ((data_json or {}).get("Data") or {}).get("Table") or []
+
+
 def business_value_artist() -> pd.DataFrame:
     """
     艺恩-艺人-艺人商业价值
@@ -77,10 +103,22 @@ def business_value_artist() -> pd.DataFrame:
         "PageSize": "100",
         "MethodName": "Data_GetList_Star",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_artist_json(url, payload)
+    rows = _endata_artist_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "排名",
+                "艺人",
+                "商业价值",
+                "专业热度",
+                "关注热度",
+                "预测热度",
+                "美誉度",
+                "统计日期",
+            ]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.columns = [
         "排名",
         "-",
@@ -115,10 +153,22 @@ def online_value_artist() -> pd.DataFrame:
         "PageSize": 100,
         "MethodName": "Data_GetList_Star",
     }
-    r = requests.post(url, data=payload)
-    r.encoding = "utf8"
-    data_json = json.loads(decrypt(r.text))
-    temp_df = pd.DataFrame(data_json["Data"]["Table"])
+    data_json = _post_endata_artist_json(url, payload)
+    rows = _endata_artist_table(data_json)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "排名",
+                "艺人",
+                "流量价值",
+                "专业热度",
+                "关注热度",
+                "预测热度",
+                "带货力",
+                "统计日期",
+            ]
+        )
+    temp_df = pd.DataFrame(rows)
     temp_df.columns = [
         "排名",
         "-",
