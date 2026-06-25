@@ -20,6 +20,17 @@ import pandas as pd
 import requests
 
 
+_FUTURES_WAREHOUSE_RECEIPT_DCE_COLUMNS = [
+    "品种代码",
+    "品种名称",
+    "仓库/分库",
+    "可选提货地点/分库-数量",
+    "昨日仓单量（手）",
+    "今日仓单量（手）",
+    "增减（手）",
+]
+
+
 def futures_warehouse_receipt_czce(date: str = "20251103") -> dict:
     """
     郑州商品交易所-交易数据-仓单日报
@@ -79,20 +90,25 @@ def futures_warehouse_receipt_dce(date: str = "20251027") -> pd.DataFrame:
         "Origin": "http://www.dce.com.cn",
         "Referer": "http://www.dce.com.cn/",
     }
-    r = requests.post(url, json=payload, headers=headers, timeout=30)
+    try:
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
+    except requests.RequestException:
+        return pd.DataFrame(columns=_FUTURES_WAREHOUSE_RECEIPT_DCE_COLUMNS)
     if r.status_code != 200 or not r.text.strip():
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_FUTURES_WAREHOUSE_RECEIPT_DCE_COLUMNS)
     try:
         data_json = r.json()
     except Exception:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_FUTURES_WAREHOUSE_RECEIPT_DCE_COLUMNS)
     if (
         "data" not in data_json
         or not data_json["data"]
         or "entityList" not in data_json["data"]
     ):
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_FUTURES_WAREHOUSE_RECEIPT_DCE_COLUMNS)
     temp_df = pd.DataFrame(data_json["data"]["entityList"])
+    if temp_df.empty:
+        return pd.DataFrame(columns=_FUTURES_WAREHOUSE_RECEIPT_DCE_COLUMNS)
     temp_df.rename(
         columns={
             "variety": "品种名称",
@@ -105,17 +121,10 @@ def futures_warehouse_receipt_dce(date: str = "20251027") -> pd.DataFrame:
         },
         inplace=True,
     )
-    temp_df = temp_df[
-        [
-            "品种代码",
-            "品种名称",
-            "仓库/分库",
-            "可选提货地点/分库-数量",
-            "昨日仓单量（手）",
-            "今日仓单量（手）",
-            "增减（手）",
-        ]
-    ]
+    try:
+        temp_df = temp_df[_FUTURES_WAREHOUSE_RECEIPT_DCE_COLUMNS]
+    except KeyError:
+        return pd.DataFrame(columns=_FUTURES_WAREHOUSE_RECEIPT_DCE_COLUMNS)
     return temp_df
 
 

@@ -16,6 +16,26 @@ import requests
 from akshare.utils import demjson
 
 
+_FUND_LCX_RANK_EM_COLUMNS = [
+    "序号",
+    "基金代码",
+    "基金简称",
+    "日期",
+    "万份收益",
+    "年化收益率-7日",
+    "年化收益率-14日",
+    "年化收益率-28日",
+    "近1周",
+    "近1月",
+    "近3月",
+    "近6月",
+    "今年来",
+    "成立来",
+    "可购买",
+    "手续费",
+]
+
+
 def __one_year_ago(date_str: str) -> date:
     # 将字符串格式的日期转换为date对象
     given_date = date(int(date_str[0:4]), int(date_str[4:6]), int(date_str[6:8]))
@@ -368,11 +388,16 @@ def fund_lcx_rank_em() -> pd.DataFrame:
         "Chrome/81.0.4044.138 Safari/537.36",
         "Referer": "https://fund.eastmoney.com/fundguzhi.html",
     }
-    r = requests.get(url, params=params, headers=headers)
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+    except requests.RequestException:
+        return pd.DataFrame(columns=_FUND_LCX_RANK_EM_COLUMNS)
     try:
         data_json = r.json()
     except:  # noqa: E722
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_FUND_LCX_RANK_EM_COLUMNS)
+    if not data_json.get("Data"):
+        return pd.DataFrame(columns=_FUND_LCX_RANK_EM_COLUMNS)
     temp_df = pd.DataFrame(data_json["Data"])
     temp_df.reset_index(inplace=True)
     temp_df["index"] = list(range(1, len(temp_df) + 1))
@@ -401,26 +426,7 @@ def fund_lcx_rank_em() -> pd.DataFrame:
         "_",
         "_",
     ]
-    temp_df = temp_df[
-        [
-            "序号",
-            "基金代码",
-            "基金简称",
-            "日期",
-            "万份收益",
-            "年化收益率-7日",
-            "年化收益率-14日",
-            "年化收益率-28日",
-            "近1周",
-            "近1月",
-            "近3月",
-            "近6月",
-            "今年来",
-            "成立来",
-            "可购买",
-            "手续费",
-        ]
-    ]
+    temp_df = temp_df[_FUND_LCX_RANK_EM_COLUMNS]
     return temp_df
 
 

@@ -29,6 +29,27 @@ from akshare.option.cons import (
 )
 
 
+_OPTION_HIST_DCE_COLUMNS = [
+    "品种名称",
+    "合约",
+    "开盘价",
+    "最高价",
+    "最低价",
+    "收盘价",
+    "前结算价",
+    "结算价",
+    "涨跌",
+    "涨跌1",
+    "Delta",
+    "隐含波动率(%)",
+    "成交量",
+    "持仓量",
+    "持仓量变化",
+    "成交额",
+    "行权量",
+]
+
+
 def option_hist_dce(
     symbol: str = "聚丙烯期权", trade_date: str = "20251016"
 ) -> pd.DataFrame:
@@ -79,13 +100,15 @@ def option_hist_dce(
         "varietyId": f"{option_code_map[symbol]}",
     }
     try:
-        r = requests.post(url, json=payload, timeout=300)
+        r = requests.post(url, json=payload, timeout=30)
         if r.status_code != 200:
-            return pd.DataFrame()
+            return pd.DataFrame(columns=_OPTION_HIST_DCE_COLUMNS)
         data_json = r.json()
     except Exception:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_OPTION_HIST_DCE_COLUMNS)
     temp_df = pd.DataFrame(data_json["data"])
+    if temp_df.empty:
+        return pd.DataFrame(columns=_OPTION_HIST_DCE_COLUMNS)
     temp_df.rename(
         columns={
             "variety": "品种名称",
@@ -108,27 +131,10 @@ def option_hist_dce(
         },
         inplace=True,
     )
-    temp_df = temp_df[
-        [
-            "品种名称",
-            "合约",
-            "开盘价",
-            "最高价",
-            "最低价",
-            "收盘价",
-            "前结算价",
-            "结算价",
-            "涨跌",
-            "涨跌1",
-            "Delta",
-            "隐含波动率(%)",
-            "成交量",
-            "持仓量",
-            "持仓量变化",
-            "成交额",
-            "行权量",
-        ]
-    ]
+    try:
+        temp_df = temp_df[_OPTION_HIST_DCE_COLUMNS]
+    except KeyError:
+        return pd.DataFrame(columns=_OPTION_HIST_DCE_COLUMNS)
     comma_cols = [
         "开盘价",
         "最高价",

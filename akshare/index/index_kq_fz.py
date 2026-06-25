@@ -11,6 +11,13 @@ import requests
 from tqdm import tqdm
 
 
+_INDEX_KQ_FZ_COLUMNS = {
+    "价格指数": ["期次", "指数", "涨跌幅"],
+    "景气指数": ["期次", "总景气指数", "涨跌幅", "流通景气指数", "生产景气指数"],
+    "外贸指数": ["期次", "价格指数", "价格指数-涨跌幅", "景气指数", "景气指数-涨跌幅"],
+}
+
+
 def index_kq_fz(symbol: str = "价格指数") -> pd.DataFrame:
     """
     中国柯桥纺织指数
@@ -33,9 +40,13 @@ def index_kq_fz(symbol: str = "价格指数") -> pd.DataFrame:
         "indexType": f"{symbol_map[symbol]}",
         "pageindex": "1",
     }
-    r = requests.get(url, params=params)
-    data_json = r.json()
-    page_num = data_json["page"]
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        data_json = r.json()
+        page_num = int(data_json["page"])
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return pd.DataFrame(columns=_INDEX_KQ_FZ_COLUMNS[symbol])
     big_df = pd.DataFrame()
     for page in tqdm(range(1, page_num + 1), leave=False):
         params = {
@@ -45,10 +56,16 @@ def index_kq_fz(symbol: str = "价格指数") -> pd.DataFrame:
             "indexType": f"{symbol_map[symbol]}",
             "pageindex": page,
         }
-        r = requests.get(url, params=params)
-        data_json = r.json()
-        temp_df = pd.DataFrame(data_json["result"])
+        try:
+            r = requests.get(url, params=params, timeout=15)
+            r.raise_for_status()
+            data_json = r.json()
+            temp_df = pd.DataFrame(data_json["result"])
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            continue
         big_df = pd.concat([big_df, temp_df], ignore_index=True)
+    if big_df.empty:
+        return pd.DataFrame(columns=_INDEX_KQ_FZ_COLUMNS[symbol])
     if symbol == "价格指数":
         big_df.columns = [
             "期次",

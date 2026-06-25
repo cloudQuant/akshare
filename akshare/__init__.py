@@ -5540,6 +5540,11 @@ from akshare.stock.stock_zh_a_tick_tx import (
 )
 
 """
+网易-股票历史成交明细
+"""
+from akshare.stock.stock_zh_a_tick_163 import stock_zh_a_tick_163
+
+"""
 新浪-指数实时行情和历史行情
 """
 from akshare.index.index_stock_zh import (

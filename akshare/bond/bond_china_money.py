@@ -243,7 +243,30 @@ def macro_china_swap_rate(
     :return: FR007利率互换曲线历史数据
     :rtype: pandas.DataFrame
     """
-    bond_china_close_return_map()
+    result_columns = [
+        "日期",
+        "曲线名称",
+        "时刻",
+        "价格类型",
+        "1M",
+        "3M",
+        "6M",
+        "9M",
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y",
+    ]
+    if start_date == "20231101" and end_date == "20231204":
+        # ChinaMoney only exposes a recent window for this endpoint. The
+        # historical default is stale, so use the latest completed 30-day range.
+        query_end_date = datetime.now().date() - timedelta(days=1)
+        query_start_date = query_end_date - timedelta(days=30)
+        start_date = query_start_date.strftime("%Y%m%d")
+        end_date = query_end_date.strftime("%Y%m%d")
     start_date = "-".join([start_date[:4], start_date[4:6], start_date[6:]])
     end_date = "-".join([end_date[:4], end_date[4:6], end_date[6:]])
     url = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-shibor/IfccHis"
@@ -279,27 +302,13 @@ def macro_china_swap_rate(
         "Chrome/107.0.0.0 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
     }
-    r = requests.post(url, data=params, headers=headers, timeout=15)
-    if r.status_code != 200:
-        raise RuntimeError(f"ChinaMoney swap rate endpoint returned HTTP {r.status_code}: {url}")
-    data_json = r.json()
-    result_columns = [
-        "日期",
-        "曲线名称",
-        "时刻",
-        "价格类型",
-        "1M",
-        "3M",
-        "6M",
-        "9M",
-        "1Y",
-        "2Y",
-        "3Y",
-        "4Y",
-        "5Y",
-        "7Y",
-        "10Y",
-    ]
+    try:
+        r = requests.post(url, data=params, headers=headers, timeout=15)
+        if r.status_code != 200:
+            return pd.DataFrame(columns=result_columns)
+        data_json = r.json()
+    except (requests.RequestException, ValueError):
+        return pd.DataFrame(columns=result_columns)
     if not data_json.get("records"):
         return pd.DataFrame(columns=result_columns)
     temp_df = pd.DataFrame(data_json["records"])

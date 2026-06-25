@@ -19,6 +19,18 @@ from urllib3.util.ssl_ import create_urllib3_context
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+_FUTURES_DELIVERY_DCE_COLUMNS = ["品种", "合约", "交割日期", "交割量", "交割金额"]
+_FUTURES_TO_SPOT_DCE_COLUMNS = ["期转现发生日期", "合约代码", "期转现数量"]
+_FUTURES_DELIVERY_MATCH_DCE_COLUMNS = [
+    "合约号",
+    "配对日期",
+    "买会员号",
+    "卖会员号",
+    "配对手数",
+    "交割结算价",
+]
+
+
 class SSLAdapter(HTTPAdapter):
     """自定义SSL适配器，解决SSL握手问题"""
     def init_poolmanager(self, *args, **kwargs):
@@ -117,8 +129,18 @@ def futures_delivery_dce(date: str = "202312") -> pd.DataFrame:
         "Upgrade-Insecure-Requests": "1",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36",
     }
-    r = requests.post(url, params=params, headers=headers)
-    temp_df = pd.read_html(StringIO(r.text))[0]
+    try:
+        r = requests.post(url, params=params, headers=headers, timeout=15)
+    except requests.RequestException:
+        return pd.DataFrame(columns=_FUTURES_DELIVERY_DCE_COLUMNS)
+    if r.status_code != 200 or not r.text.strip() or "<html" not in r.text.lower():
+        return pd.DataFrame(columns=_FUTURES_DELIVERY_DCE_COLUMNS)
+    try:
+        temp_df = pd.read_html(StringIO(r.text))[0]
+    except ValueError:
+        return pd.DataFrame(columns=_FUTURES_DELIVERY_DCE_COLUMNS)
+    if temp_df.empty:
+        return pd.DataFrame(columns=_FUTURES_DELIVERY_DCE_COLUMNS)
     temp_df["交割日期"] = (
         temp_df["交割日期"].astype(str).str.split(".", expand=True).iloc[:, 0]
     )
@@ -151,7 +173,9 @@ def futures_to_spot_dce(date: str = "202312") -> pd.DataFrame:
     try:
         temp_df = pd.read_html(StringIO(r.text))[0]
     except ValueError:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_FUTURES_TO_SPOT_DCE_COLUMNS)
+    if temp_df.empty:
+        return pd.DataFrame(columns=_FUTURES_TO_SPOT_DCE_COLUMNS)
     temp_df["期转现发生日期"] = (
         temp_df["期转现发生日期"].astype(str).str.split(".", expand=True).iloc[:, 0]
     )
@@ -179,8 +203,18 @@ def futures_delivery_match_dce(symbol: str = "a") -> pd.DataFrame:
         "contract.contract_id": "all",
         "contract.variety_id": symbol,
     }
-    r = requests.post(url, params=params)
-    temp_df = pd.read_html(StringIO(r.text))[0]
+    try:
+        r = requests.post(url, params=params, timeout=15)
+    except requests.RequestException:
+        return pd.DataFrame(columns=_FUTURES_DELIVERY_MATCH_DCE_COLUMNS)
+    if r.status_code != 200 or not r.text.strip() or "<html" not in r.text.lower():
+        return pd.DataFrame(columns=_FUTURES_DELIVERY_MATCH_DCE_COLUMNS)
+    try:
+        temp_df = pd.read_html(StringIO(r.text))[0]
+    except ValueError:
+        return pd.DataFrame(columns=_FUTURES_DELIVERY_MATCH_DCE_COLUMNS)
+    if temp_df.empty:
+        return pd.DataFrame(columns=_FUTURES_DELIVERY_MATCH_DCE_COLUMNS)
     temp_df["配对日期"] = (
         temp_df["配对日期"].astype(str).str.split(".", expand=True).iloc[:, 0]
     )

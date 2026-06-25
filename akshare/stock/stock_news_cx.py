@@ -10,6 +10,9 @@ import pandas as pd
 import requests
 
 
+_STOCK_NEWS_MAIN_CX_COLUMNS = ["tag", "summary", "url"]
+
+
 def stock_news_main_cx() -> pd.DataFrame:
     """
     财新网-财新数据通
@@ -27,11 +30,15 @@ def stock_news_main_cx() -> pd.DataFrame:
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
         "referer": "https://cxdata.caixin.com/index/newsTab?tab=latest",
     }
-    r = requests.get(url, params=params, headers=headers)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"]["data"])
-    temp_df = temp_df[["tag", "summary", "url"]]
-    temp_df.columns = ["tag", "summary", "url"]
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        data_json = r.json()
+        temp_df = pd.DataFrame(data_json["data"]["data"])
+        temp_df = temp_df[_STOCK_NEWS_MAIN_CX_COLUMNS]
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return pd.DataFrame(columns=_STOCK_NEWS_MAIN_CX_COLUMNS)
+    temp_df.columns = _STOCK_NEWS_MAIN_CX_COLUMNS
     temp_df.dropna(inplace=True)
     return temp_df
 

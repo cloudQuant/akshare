@@ -38,8 +38,8 @@ def _sge_request_json(
     *,
     payload: dict | None = None,
     request_headers: dict | None = None,
-    timeout: int = 15,
-    max_retries: int = 2,
+    timeout: int = 10,
+    max_retries: int = 1,
     retry_delay: float = 1.0,
 ) -> dict | None:
     for attempt in range(max_retries + 1):

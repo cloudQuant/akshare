@@ -7,12 +7,37 @@ https://www.99qh.com/
 """
 
 import json
-from datetime import datetime
 from functools import lru_cache
 
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+
+
+def __fetch_99_stock_page(product_id=None) -> dict:
+    """
+    99 期货网-库存页面内置数据
+    https://www.99qh.com/data/stockIn?productId=12
+    :param product_id: 品种编号
+    :return: 页面内置数据
+    :rtype: dict
+    """
+    url = "https://www.99qh.com/data/stockIn"
+    params = {"productId": product_id} if product_id is not None else None
+    headers = {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/120.0.0.0 Safari/537.36",
+        "referer": "https://www.99qh.com/data/stockIn",
+    }
+    r = requests.get(url, params=params, headers=headers, verify=False, timeout=15)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, features="lxml")
+    raw_data = soup.find(attrs={"id": "__NEXT_DATA__"})
+    if raw_data is None or not raw_data.text:
+        raise ValueError("未找到 99 期货库存页面内置数据")
+    data_json = json.loads(raw_data.text)
+    return data_json["props"]["pageProps"]["data"]
 
 
 @lru_cache(maxsize=32)
@@ -25,20 +50,16 @@ def __get_99_symbol_map() -> pd.DataFrame:
     """
     import warnings
     warnings.filterwarnings("ignore")
-    url = "https://www.99qh.com/data/stockIn"
-    r = requests.get(url, verify=False)
-    soup = BeautifulSoup(r.text, features="lxml")
-    raw_data = soup.find(attrs={"id": "__NEXT_DATA__"}).text
-    data_json = json.loads(raw_data)
+    data_json = __fetch_99_stock_page()
     df_list = []
-    for i, item in enumerate(
-        data_json["props"]["pageProps"]["data"]["varietyListData"]
-    ):
+    for i, item in enumerate(data_json["varietyListData"]):
         temp_df = pd.DataFrame(
-            data_json["props"]["pageProps"]["data"]["varietyListData"][i]["productList"]
+            data_json["varietyListData"][i]["productList"]
         )
         df_list.append(temp_df)
 
+    if not df_list:
+        return pd.DataFrame()
     big_df = pd.concat(df_list, ignore_index=True)
     return big_df
 
@@ -56,37 +77,32 @@ def futures_inventory_99(symbol: str = "豆一") -> pd.DataFrame:
     warnings.filterwarnings("ignore")
     temp_df = __get_99_symbol_map()
     symbol_name_map = dict(zip(temp_df["name"], temp_df["productId"]))
-    symbol_code_map = dict(zip(temp_df["code"], temp_df["productId"]))
+    symbol_code_map = {
+        str(code).lower(): product_id
+        for code, product_id in zip(temp_df["code"], temp_df["productId"])
+    }
+    symbol = symbol.strip()
     if symbol in symbol_name_map:  # 如果输入的是中文名称
         product_id = symbol_name_map[symbol]
-    elif symbol in symbol_code_map:  # 如果输入的是代码
-        product_id = symbol_code_map[symbol]
+    elif symbol.lower() in symbol_code_map:  # 如果输入的是代码
+        product_id = symbol_code_map[symbol.lower()]
     else:
         raise ValueError(f"未找到品种 {symbol} 对应的编号")
 
-    url = "https://centerapi.fx168api.com/app/qh/api/stock/trend"
-    headers = {
-        "Content-Type": "application/json;charset=UTF-8",
-        "_pcc": "J7Dwju3vSeTlLLfTOLBnMXMtc9+PI1GWJR82GTEemXB9ORwBKCyPNDNVUQQv8p1jL3mLpZJ0PHt8"
-                "HZ57YtInOoeRj900V6EBBuvPTDAD9bghKWx4sNHiZNJhkzb4cSjlSO9ZcyZPHXuCLp2szfvtZSgCGQSbTFLUnHJsMrUFxJw=",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/58.0.3029.110 Safari/537.3",
-        "referer": "https://www.99qh.com",
-        "origin": "https://www.99qh.com",
-    }
-    params = {
-        "productId": product_id,
-        "type": "1",
-        "pageNo": "1",
-        "pageSize": "5000",
-        "startDate": "",
-        "endDate": f"{datetime.now().date().isoformat()}",
-        "appCategory": "web",
-    }
-    r = requests.get(url, params, headers=headers, verify=False)
-    data_json = r.json()
-    temp_df = pd.DataFrame(data_json["data"]["list"])
-    temp_df.columns = ["日期", "收盘价", "库存"]
+    data_json = __fetch_99_stock_page(product_id=product_id)
+    stock_list = data_json.get("positionTrendChartListData", {}).get("list", [])
+    if stock_list:
+        temp_df = pd.DataFrame(stock_list, columns=["日期", "收盘价", "库存"])
+    else:
+        stock_list = data_json.get("positionTrendTableListData", {}).get("list", [])
+        temp_df = pd.DataFrame(stock_list)
+        if temp_df.empty:
+            return pd.DataFrame(columns=["日期", "收盘价", "库存"])
+        temp_df.rename(
+            columns={"date": "日期", "close": "收盘价", "stock": "库存"},
+            inplace=True,
+        )
+        temp_df = temp_df[["日期", "收盘价", "库存"]]
     temp_df.sort_values(by=["日期"], ignore_index=True, inplace=True)
     temp_df["日期"] = pd.to_datetime(temp_df["日期"], errors="coerce").dt.date
     temp_df["收盘价"] = pd.to_numeric(temp_df["收盘价"], errors="coerce")
