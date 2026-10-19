@@ -2,13 +2,28 @@
 """
 Date: 2025/12/31
 Desc: HTTP 请求工具函数
+
+Eastmoney session environment variables:
+- AKSHARE_EASTMONEY_COOKIE: Cookie header value; takes precedence over files.
+- AKSHARE_EASTMONEY_COOKIE_FILE: Cookie cache path
+  (default: ~/.cache/akshare/eastmoney_cookie.txt).
+- AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND: command that prints a fresh Cookie
+  header; run after a session failure before the request is retried.
+- AKSHARE_EASTMONEY_COOKIE_REFRESH_TIMEOUT: refresh timeout in seconds (default 120).
+- AKSHARE_EASTMONEY_INTERACTIVE_AUTH: open a browser for manual verification
+  when no refresh command produces a Cookie; defaults to on for interactive
+  desktop terminals with Selenium installed.
 """
 
 import random
 import os
 import platform
+import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Dict, Tuple
@@ -29,6 +44,9 @@ _EASTMONEY_HEADERS = {
 }
 _EASTMONEY_FAILED_HOSTS: dict[tuple[str, str], float] = {}
 _EASTMONEY_FAILURE_COOLDOWN = 60.0
+_EASTMONEY_COOKIE_REFRESH_LOCK = threading.Lock()
+_EASTMONEY_COOKIE_REFRESH_INTERVAL = 60.0
+_EASTMONEY_LAST_COOKIE_REFRESH = 0.0
 _SZSE_FAILED_HOSTS: set[str] = set()
 _SZSE_HOST = "www.szse.cn"
 _SZSE_DEFAULT_RESOLVE_IPS = ("113.108.107.138",)
@@ -41,25 +59,225 @@ _DEFAULT_BROWSER_UA = "Mozilla/5.0"
 
 
 def _reset_eastmoney_fallback_cache() -> None:
+    global _EASTMONEY_LAST_COOKIE_REFRESH
     _EASTMONEY_FAILED_HOSTS.clear()
+    _EASTMONEY_LAST_COOKIE_REFRESH = 0.0
+
+
+def _eastmoney_cookie_path() -> Path | None:
+    if os.environ.get("AKSHARE_EASTMONEY_COOKIE") is not None:
+        return None
+    configured_path = os.environ.get("AKSHARE_EASTMONEY_COOKIE_FILE")
+    if configured_path:
+        return Path(configured_path).expanduser()
+    return Path.home() / ".cache" / "akshare" / "eastmoney_cookie.txt"
+
+
+def _validate_eastmoney_cookie(cookie: str) -> str:
+    cookie = cookie.strip()
+    if not cookie:
+        return ""
+    if cookie.lower().startswith("cookie:"):
+        cookie = cookie[len("cookie:") :].strip()
+    if "\r" in cookie or "\n" in cookie:
+        raise ValueError("Eastmoney Cookie must be a single-line HTTP header value")
+    if "=" not in cookie:
+        raise ValueError("Eastmoney Cookie must contain name=value pairs")
+    return cookie
 
 
 def _get_eastmoney_cookie() -> str:
     cookie = os.environ.get("AKSHARE_EASTMONEY_COOKIE")
     if cookie is None:
-        configured_path = os.environ.get("AKSHARE_EASTMONEY_COOKIE_FILE")
-        cookie_path = (
-            Path(configured_path).expanduser()
-            if configured_path
-            else Path.home() / ".cache" / "akshare" / "eastmoney_cookie.txt"
-        )
-        if not configured_path and not cookie_path.exists():
+        cookie_path = _eastmoney_cookie_path()
+        if cookie_path is None:
+            return ""
+        if not cookie_path.exists() and not os.environ.get(
+            "AKSHARE_EASTMONEY_COOKIE_FILE"
+        ):
             return ""
         cookie = cookie_path.read_text(encoding="utf-8")
-    cookie = cookie.strip()
-    if "\r" in cookie or "\n" in cookie:
-        raise ValueError("Eastmoney Cookie must be a single-line HTTP header value")
-    return cookie
+    return _validate_eastmoney_cookie(cookie)
+
+
+def _save_eastmoney_cookie(cookie: str) -> None:
+    cookie_path = _eastmoney_cookie_path()
+    if cookie_path is None:
+        return
+    cookie_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=cookie_path.parent,
+        prefix=".eastmoney-cookie-",
+        delete=False,
+    )
+    try:
+        with temporary:
+            temporary.write(cookie)
+        os.chmod(temporary.name, 0o600)
+        os.replace(temporary.name, cookie_path)
+    except BaseException:
+        Path(temporary.name).unlink(missing_ok=True)
+        raise
+
+
+def _eastmoney_cookie_refresh_timeout() -> float:
+    try:
+        return max(
+            1.0,
+            float(os.environ.get("AKSHARE_EASTMONEY_COOKIE_REFRESH_TIMEOUT", "120")),
+        )
+    except ValueError:
+        return 120.0
+
+
+def _interactive_eastmoney_auth_enabled() -> bool:
+    configured = os.environ.get("AKSHARE_EASTMONEY_INTERACTIVE_AUTH")
+    if configured is not None:
+        return configured.strip().lower() not in {"", "0", "false", "no", "off"}
+    if not sys.stdout.isatty():
+        return False
+    if platform.system() in {"Darwin", "Windows"}:
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _refresh_eastmoney_cookie_with_command(timeout: float) -> str:
+    command = os.environ.get("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "").strip()
+    if not command:
+        return ""
+    try:
+        result = subprocess.run(
+            shlex.split(command, posix=platform.system() != "Windows"),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    try:
+        return _validate_eastmoney_cookie(result.stdout)
+    except ValueError:
+        return ""
+
+
+def _refresh_eastmoney_cookie_with_browser(timeout: float) -> str:
+    if not _interactive_eastmoney_auth_enabled():
+        return ""
+    try:
+        from selenium import webdriver
+        from selenium.common.exceptions import WebDriverException
+    except ImportError:
+        return ""
+    if sys.stderr.isatty():
+        print(
+            "Eastmoney session expired; complete the browser verification to refresh it.",
+            file=sys.stderr,
+            flush=True,
+        )
+    driver = None
+    try:
+        driver = webdriver.Chrome()
+        driver.set_page_load_timeout(30)
+        driver.get("https://quote.eastmoney.com/")
+        driver.set_script_timeout(8)
+        verification = """
+            const done = arguments[arguments.length - 1];
+            fetch(
+              'https://push2his.eastmoney.com/api/qt/stock/kline/get'
+              + '?secid=0.000001&klt=101&fqt=1&lmt=1&end=20500101'
+              + '&fields1=f1&fields2=f51,f52&ut=fa5fd1943c7b386f172d6893dbfba10b',
+              {credentials: 'include'}
+            ).then(r => r.json()).then(data => done(data.rc === 0))
+             .catch(() => done(false));
+        """
+        deadline = time.monotonic() + timeout
+        next_check = time.monotonic()
+        while time.monotonic() < deadline:
+            if time.monotonic() >= next_check:
+                try:
+                    if driver.execute_async_script(verification):
+                        cookies = {
+                            item["name"]: item["value"]
+                            for item in driver.get_cookies()
+                            if item.get("domain", "")
+                            .lstrip(".")
+                            .endswith("eastmoney.com")
+                        }
+                        return _validate_eastmoney_cookie(
+                            "; ".join(f"{k}={v}" for k, v in cookies.items())
+                        )
+                except WebDriverException:
+                    pass
+                next_check = time.monotonic() + 5
+            time.sleep(1)
+        return ""
+    except (WebDriverException, OSError):
+        return ""
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
+def _refresh_eastmoney_cookie(previous_cookie: str) -> str:
+    global _EASTMONEY_LAST_COOKIE_REFRESH
+    try:
+        current_cookie = _get_eastmoney_cookie()
+    except (OSError, ValueError):
+        current_cookie = ""
+    if current_cookie and current_cookie != previous_cookie:
+        return current_cookie
+    now = time.monotonic()
+    if now - _EASTMONEY_LAST_COOKIE_REFRESH < _EASTMONEY_COOKIE_REFRESH_INTERVAL:
+        return ""
+    with _EASTMONEY_COOKIE_REFRESH_LOCK:
+        try:
+            current_cookie = _get_eastmoney_cookie()
+        except (OSError, ValueError):
+            current_cookie = ""
+        if current_cookie and current_cookie != previous_cookie:
+            return current_cookie
+        now = time.monotonic()
+        if now - _EASTMONEY_LAST_COOKIE_REFRESH < _EASTMONEY_COOKIE_REFRESH_INTERVAL:
+            return ""
+        _EASTMONEY_LAST_COOKIE_REFRESH = now
+        timeout = _eastmoney_cookie_refresh_timeout()
+        refreshed = _refresh_eastmoney_cookie_with_command(timeout)
+        if not refreshed:
+            refreshed = _refresh_eastmoney_cookie_with_browser(timeout)
+        if refreshed and refreshed != previous_cookie:
+            try:
+                _save_eastmoney_cookie(refreshed)
+            except OSError:
+                pass
+            return refreshed
+    return ""
+
+
+def _is_eastmoney_cookie_failure(exc: BaseException | None) -> bool:
+    if isinstance(exc, requests.HTTPError):
+        return exc.response is not None and exc.response.status_code in {401, 403}
+    if isinstance(exc, requests.Timeout):
+        return True
+    if isinstance(exc, requests.ConnectionError):
+        message = repr(exc)
+        return any(
+            marker in message
+            for marker in (
+                "RemoteDisconnected",
+                "Connection aborted",
+                "Connection reset",
+                "Empty reply",
+                "timed out",
+            )
+        )
+    return False
 
 
 def _eastmoney_curl_interface() -> str:
@@ -361,6 +579,7 @@ def request_eastmoney(
     headers: Dict = None,
     timeout: int | float | None = 15,
     max_retries: int = 2,
+    _allow_cookie_refresh: bool = True,
     **kwargs,
 ) -> requests.Response:
     """Request Eastmoney push APIs with an optional verified website session."""
@@ -369,15 +588,16 @@ def request_eastmoney(
         request_headers.update(headers)
     parts = urlsplit(_prepared_get_url(url, None))
     primary_host_key = _eastmoney_failed_host_key(parts.hostname or "")
+    managed_cookie = ""
     if (
         parts.scheme == "https"
         and primary_host_key in (*_EASTMONEY_PUSH_HOSTS, _EASTMONEY_DELAY_HOST)
         and "Cookie" not in request_headers
         and "cookies" not in kwargs
     ):
-        cookie = _get_eastmoney_cookie()
-        if cookie:
-            request_headers["Cookie"] = cookie
+        managed_cookie = _get_eastmoney_cookie()
+        if managed_cookie:
+            request_headers["Cookie"] = managed_cookie
     has_cookie = "Cookie" in request_headers or "cookies" in kwargs
     last_exception = None
     urls = eastmoney_fallback_urls(url)
@@ -438,6 +658,24 @@ def request_eastmoney(
                     time.sleep(0.2 * (attempt + 1))
     _EASTMONEY_FAILED_HOSTS.pop(cache_key, None)
     if last_exception is not None:
+        if (
+            _allow_cookie_refresh
+            and managed_cookie
+            and _is_eastmoney_cookie_failure(last_exception)
+        ):
+            refreshed_cookie = _refresh_eastmoney_cookie(managed_cookie)
+            if refreshed_cookie and refreshed_cookie != managed_cookie:
+                refreshed_headers = dict(headers or {})
+                refreshed_headers["Cookie"] = refreshed_cookie
+                return request_eastmoney(
+                    url,
+                    params=params,
+                    headers=refreshed_headers,
+                    timeout=timeout,
+                    max_retries=max_retries,
+                    _allow_cookie_refresh=False,
+                    **kwargs,
+                )
         raise last_exception
     return requests.get(
         url,

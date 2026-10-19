@@ -12,7 +12,9 @@ def reset_eastmoney_cache(monkeypatch):
     request_utils._reset_eastmoney_fallback_cache()
     monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_INTERFACE", "off")
     monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", "")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_INTERACTIVE_AUTH", "0")
     monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE_FILE", raising=False)
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", raising=False)
     yield
     request_utils._reset_eastmoney_fallback_cache()
 
@@ -382,6 +384,429 @@ def test_request_eastmoney_tries_curl_interface_before_push2his_delay(monkeypatc
     assert "--interface" in called_curl[0]
     assert "en0" in called_curl[0]
     assert not any("push2delay.eastmoney.com" in item for item in called_urls)
+
+
+def _cookie_failure():
+    return requests.ConnectionError(
+        "('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+    )
+
+
+def _write_cookie(tmp_path, cookie):
+    cookie_file = tmp_path / "eastmoney_cookie.txt"
+    cookie_file.write_text(cookie, encoding="utf-8")
+    return cookie_file
+
+
+def test_eastmoney_refresh_command_updates_cookie_and_retries(monkeypatch, tmp_path):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    called = []
+    commands = []
+
+    def fake_get(url, **kwargs):
+        called.append(kwargs["headers"]["Cookie"])
+        if len(called) == 1:
+            raise _cookie_failure()
+        return SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def fake_run(command, **kwargs):
+        commands.append((command, kwargs["timeout"]))
+        return SimpleNamespace(returncode=0, stdout="Cookie: refreshed=2\n", stderr="")
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(request_utils.subprocess, "run", fake_run)
+
+    response = request_utils.request_eastmoney(
+        "https://push2delay.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+    )
+
+    assert response.status_code == 200
+    assert called == ["old=1", "refreshed=2"]
+    assert commands == [(["refresh-cookie"], 120.0)]
+    assert cookie_file.read_text(encoding="utf-8") == "refreshed=2"
+    assert cookie_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_eastmoney_refresh_survives_unwritable_cache(monkeypatch, tmp_path):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    called = []
+
+    def fake_get(url, **kwargs):
+        called.append(kwargs["headers"]["Cookie"])
+        if len(called) == 1:
+            raise _cookie_failure()
+        return SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(
+        request_utils.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout="new=2", stderr=""
+        ),
+    )
+    monkeypatch.setattr(
+        request_utils,
+        "_save_eastmoney_cookie",
+        lambda _: (_ for _ in ()).throw(OSError("read-only cache")),
+    )
+
+    response = request_utils.request_eastmoney(
+        "https://push2delay.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+    )
+
+    assert response.status_code == 200
+    assert called == ["old=1", "new=2"]
+
+
+def test_eastmoney_refresh_rereads_externally_updated_cookie_file(
+    monkeypatch, tmp_path
+):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    called = []
+
+    def fake_get(url, **kwargs):
+        called.append(kwargs["headers"]["Cookie"])
+        if len(called) == 1:
+            cookie_file.write_text("external=2", encoding="utf-8")
+            raise _cookie_failure()
+        return SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(
+        request_utils,
+        "_refresh_eastmoney_cookie_with_browser",
+        lambda _: pytest.fail("unexpected browser"),
+    )
+
+    request_utils.request_eastmoney(
+        "https://push2delay.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+    )
+
+    assert called == ["old=1", "external=2"]
+
+
+@pytest.mark.parametrize(
+    "refresh_result",
+    [
+        SimpleNamespace(returncode=1, stdout="", stderr="failed"),
+        SimpleNamespace(returncode=0, stdout="", stderr=""),
+        SimpleNamespace(returncode=0, stdout="first=1\nsecond=2", stderr=""),
+        SimpleNamespace(returncode=0, stdout="not-a-cookie", stderr=""),
+        SimpleNamespace(returncode=0, stdout="old=1", stderr=""),
+    ],
+)
+def test_eastmoney_refresh_without_new_cookie_does_not_retry(
+    monkeypatch, tmp_path, refresh_result
+):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    called = []
+
+    def fake_get(url, **kwargs):
+        called.append(kwargs["headers"]["Cookie"])
+        raise _cookie_failure()
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(
+        request_utils.subprocess,
+        "run",
+        lambda *args, **kwargs: refresh_result,
+    )
+
+    with pytest.raises(requests.ConnectionError):
+        request_utils.request_eastmoney(
+            "https://push2delay.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+        )
+
+    assert called == ["old=1"]
+
+
+def test_eastmoney_refresh_timeout_keeps_original_failure(monkeypatch, tmp_path):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_TIMEOUT", "2")
+    called = []
+
+    def fake_get(url, **kwargs):
+        called.append(kwargs["headers"]["Cookie"])
+        raise _cookie_failure()
+
+    def fake_run(command, **kwargs):
+        assert kwargs["timeout"] == 2.0
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(request_utils.subprocess, "run", fake_run)
+
+    with pytest.raises(requests.ConnectionError):
+        request_utils.request_eastmoney(
+            "https://push2delay.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+        )
+
+    assert called == ["old=1"]
+
+
+def test_eastmoney_refresh_retries_only_once(monkeypatch, tmp_path):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    called = []
+    commands = []
+
+    def fake_get(url, **kwargs):
+        called.append(kwargs["headers"]["Cookie"])
+        raise _cookie_failure()
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout="new=2", stderr="")
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(request_utils.subprocess, "run", fake_run)
+
+    with pytest.raises(requests.ConnectionError):
+        request_utils.request_eastmoney(
+            "https://push2delay.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+        )
+
+    assert called == ["old=1", "new=2"]
+    assert commands == [["refresh-cookie"]]
+
+
+def test_eastmoney_refresh_obeys_cooldown(monkeypatch, tmp_path):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    called = []
+    commands = []
+
+    def fake_get(url, **kwargs):
+        called.append(kwargs["headers"]["Cookie"])
+        raise _cookie_failure()
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout="new=2", stderr="")
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(request_utils.subprocess, "run", fake_run)
+    url = "https://push2delay.eastmoney.com/api/qt/stock/kline/get"
+
+    with pytest.raises(requests.ConnectionError):
+        request_utils.request_eastmoney(url, max_retries=1)
+    with pytest.raises(requests.ConnectionError):
+        request_utils.request_eastmoney(url, max_retries=1)
+
+    assert called == ["old=1", "new=2", "new=2"]
+    assert commands == [["refresh-cookie"]]
+
+
+def test_eastmoney_refresh_skips_caller_managed_credentials(
+    monkeypatch, eastmoney_requests
+):
+    import akshare.utils.request as request_utils
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    monkeypatch.setattr(
+        request_utils.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("unexpected refresh"),
+    )
+
+    def fake_get(url, **kwargs):
+        raise _cookie_failure()
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    for kwargs in (
+        {"headers": {"Cookie": "caller=1"}},
+        {"cookies": {"caller": "1"}},
+        {"headers": {"Authorization": "private"}},
+    ):
+        with pytest.raises(requests.ConnectionError):
+            request_utils.request_eastmoney(
+                "https://push2delay.eastmoney.com/api/qt/stock/kline/get",
+                max_retries=1,
+                **kwargs,
+            )
+
+
+def test_eastmoney_refresh_skips_non_session_failures(monkeypatch, tmp_path):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    monkeypatch.setattr(
+        request_utils.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("unexpected refresh"),
+    )
+
+    def fake_get(url, **kwargs):
+        raise requests.ConnectionError("Name or service not known")
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+
+    with pytest.raises(requests.ConnectionError, match="Name or service"):
+        request_utils.request_eastmoney(
+            "https://push2delay.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+        )
+
+
+def test_eastmoney_refresh_on_http_forbidden(monkeypatch, tmp_path):
+    import akshare.utils.request as request_utils
+
+    cookie_file = _write_cookie(tmp_path, "old=1")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_REFRESH_COMMAND", "refresh-cookie")
+    called = []
+
+    def fake_get(url, **kwargs):
+        called.append(kwargs["headers"]["Cookie"])
+        if len(called) == 1:
+            response = requests.Response()
+            response.status_code = 403
+            raise requests.HTTPError("forbidden", response=response)
+        return SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(
+        request_utils.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout="new=2", stderr=""
+        ),
+    )
+
+    request_utils.request_eastmoney(
+        "https://push2delay.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+    )
+
+    assert called == ["old=1", "new=2"]
+
+
+@pytest.mark.parametrize(
+    "error, expected",
+    [
+        (requests.Timeout("timed out"), True),
+        (requests.ConnectionError("RemoteDisconnected()"), True),
+        (requests.ConnectionError("Connection reset by peer"), True),
+        (requests.ConnectionError("Name or service not known"), False),
+        (requests.ConnectionError("certificate verify failed"), False),
+    ],
+)
+def test_eastmoney_cookie_failure_detection(error, expected):
+    from akshare.utils.request import _is_eastmoney_cookie_failure
+
+    assert _is_eastmoney_cookie_failure(error) is expected
+
+
+def test_eastmoney_interactive_auth_requires_opt_in(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_INTERACTIVE_AUTH", "0")
+    assert request_utils._interactive_eastmoney_auth_enabled() is False
+    monkeypatch.setenv("AKSHARE_EASTMONEY_INTERACTIVE_AUTH", "1")
+    assert request_utils._interactive_eastmoney_auth_enabled() is True
+
+
+def test_eastmoney_browser_refresh_disabled_without_opt_in(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_INTERACTIVE_AUTH", "0")
+    assert request_utils._refresh_eastmoney_cookie_with_browser(1) == ""
+
+
+@pytest.mark.parametrize("verified", [True, False])
+def test_eastmoney_browser_refresh_collects_only_verified_site_cookies(
+    monkeypatch, verified
+):
+    import sys
+    import types
+    from akshare.utils import request as request_utils
+
+    class FakeDriver:
+        def __init__(self):
+            self.quit_called = False
+
+        def set_page_load_timeout(self, value):
+            assert value == 30
+
+        def get(self, url):
+            assert url == "https://quote.eastmoney.com/"
+
+        def set_script_timeout(self, value):
+            assert value == 8
+
+        def execute_async_script(self, script):
+            assert "credentials: 'include'" in script
+            return verified
+
+        def get_cookies(self):
+            return [
+                {"name": "session", "value": "new", "domain": ".eastmoney.com"},
+                {"name": "quote", "value": "value", "domain": "quote.eastmoney.com"},
+                {"name": "foreign", "value": "nope", "domain": ".example.test"},
+            ]
+
+        def quit(self):
+            self.quit_called = True
+
+    driver = FakeDriver()
+    webdriver_module = types.ModuleType("selenium.webdriver")
+    webdriver_module.Chrome = lambda: driver
+    exceptions_module = types.ModuleType("selenium.common.exceptions")
+    exceptions_module.WebDriverException = RuntimeError
+    selenium_module = types.ModuleType("selenium")
+    selenium_module.webdriver = webdriver_module
+    monkeypatch.setitem(sys.modules, "selenium", selenium_module)
+    monkeypatch.setitem(sys.modules, "selenium.webdriver", webdriver_module)
+    monkeypatch.setitem(
+        sys.modules, "selenium.common", types.ModuleType("selenium.common")
+    )
+    monkeypatch.setitem(sys.modules, "selenium.common.exceptions", exceptions_module)
+    monkeypatch.setenv("AKSHARE_EASTMONEY_INTERACTIVE_AUTH", "1")
+    monkeypatch.setattr(request_utils.time, "sleep", lambda _: None)
+
+    cookie = request_utils._refresh_eastmoney_cookie_with_browser(1)
+
+    assert driver.quit_called
+    if verified:
+        assert cookie == "session=new; quote=value"
+        assert "foreign" not in cookie
+    else:
+        assert cookie == ""
 
 
 def test_eastmoney_curl_success_remains_available_on_later_calls(monkeypatch):
