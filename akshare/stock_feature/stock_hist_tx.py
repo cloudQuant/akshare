@@ -73,13 +73,16 @@ def stock_zh_a_hist_tx(
         range_end = int(end_date.split("-")[0]) + 1
     big_df = pd.DataFrame()
     tqdm = get_tqdm()
-    for year in tqdm(range(range_start, range_end), leave=False):
+    # Step 2 years, not 1: each request returns the last 640 bars counting back from
+    # {year+1}-12-31, which spans ~2.67 years, so 2-year steps still overlap by ~7 months
+    # and tile the range with no gap. A 3-year step would leave ~3 months unfetched.
+    for year in tqdm(range(range_start, range_end, 2), leave=False):
         params = {
             "_var": f"kline_day{adjust}{year}",
             "param": f"{symbol},day,{year}-01-01,{year + 1}-12-31,640,{adjust}",
             "r": "0.8205512681390605",
         }
-        r = requests.get(url, params=params, timeout=timeout)
+        r = requests.get(url, params=params, timeout=timeout or 20)
         data_text = r.text
         data_json = demjson.decode(data_text[data_text.find("={") + 1 :])["data"][
             symbol

@@ -1086,25 +1086,21 @@ def fund_etf_fund_info_em(
         data_json = r.json()
         temp_df = pd.DataFrame(data_json["Data"]["LSJZList"])
         df_list.append(temp_df)
-    big_df = pd.concat(df_list)
-    big_df.columns = [
-        "净值日期",
-        "单位净值",
-        "累计净值",
-        "_",
-        "_",
-        "_",
-        "日增长率",
-        "申购状态",
-        "赎回状态",
-        "_",
-        "_",
-        "_",
-        "_",
-    ]
+    big_df = pd.concat(df_list, ignore_index=True)
+    # Select by the JSON keys the F10 endpoint returns. A positional rename broke as
+    # soon as East Money appended a field (LSJZList now carries 14 keys, incl. FHFCZ10).
     big_df = big_df[
-        ["净值日期", "单位净值", "累计净值", "日增长率", "申购状态", "赎回状态"]
-    ]
+        ["FSRQ", "DWJZ", "LJJZ", "JZZZL", "SGZT", "SHZT"]
+    ].rename(
+        columns={
+            "FSRQ": "净值日期",
+            "DWJZ": "单位净值",
+            "LJJZ": "累计净值",
+            "JZZZL": "日增长率",
+            "SGZT": "申购状态",
+            "SHZT": "赎回状态",
+        }
+    )
     big_df["净值日期"] = pd.to_datetime(big_df["净值日期"], errors="coerce").dt.date
     big_df["单位净值"] = pd.to_numeric(big_df["单位净值"], errors="coerce")
     big_df["累计净值"] = pd.to_numeric(big_df["累计净值"], errors="coerce")
