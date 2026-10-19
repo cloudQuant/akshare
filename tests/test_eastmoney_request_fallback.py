@@ -1,6 +1,221 @@
+import subprocess
 from types import SimpleNamespace
 
+import pytest
 import requests
+
+
+@pytest.fixture(autouse=True)
+def reset_eastmoney_cache(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    request_utils._reset_eastmoney_fallback_cache()
+    monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_INTERFACE", "off")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", "")
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE_FILE", raising=False)
+    yield
+    request_utils._reset_eastmoney_fallback_cache()
+
+
+@pytest.fixture
+def eastmoney_requests(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["push2his.eastmoney.com", "7.push2his.eastmoney.com", "push2delay.eastmoney.com"],
+)
+def test_eastmoney_cookie_from_environment(monkeypatch, eastmoney_requests, host):
+    from akshare.utils.request import request_eastmoney
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", " verified=session ")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", "/unused-cookie-file")
+
+    request_eastmoney(f"https://{host}/api/qt/stock/kline/get", max_retries=1)
+
+    assert eastmoney_requests[0][1]["headers"]["Cookie"] == "verified=session"
+
+
+@pytest.mark.parametrize("explicit_path", [False, True])
+def test_eastmoney_cookie_file_is_loaded_and_refreshed(
+    monkeypatch, tmp_path, eastmoney_requests, explicit_path
+):
+    from akshare.utils.request import request_eastmoney
+
+    cookie_file = tmp_path / ".cache" / "akshare" / "eastmoney_cookie.txt"
+    cookie_file.parent.mkdir(parents=True)
+    cookie_file.write_text("verified=first\n", encoding="utf-8")
+    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    if explicit_path:
+        monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    request_eastmoney(url, max_retries=1)
+    cookie_file.write_text("verified=refreshed", encoding="utf-8")
+    request_eastmoney(url, max_retries=1)
+
+    assert [call[1]["headers"]["Cookie"] for call in eastmoney_requests] == [
+        "verified=first",
+        "verified=refreshed",
+    ]
+
+
+def test_eastmoney_empty_cookie_environment_disables_cache(
+    monkeypatch, tmp_path, eastmoney_requests
+):
+    from akshare.utils.request import request_eastmoney
+
+    cookie_file = tmp_path / "cookie.txt"
+    cookie_file.write_text("verified=session", encoding="utf-8")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", "")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE_FILE", str(cookie_file))
+
+    request_eastmoney(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+    )
+
+    assert "Cookie" not in eastmoney_requests[0][1]["headers"]
+
+
+def test_eastmoney_missing_default_cookie_file_allows_anonymous_requests(
+    monkeypatch, tmp_path, eastmoney_requests
+):
+    from akshare.utils.request import request_eastmoney
+
+    monkeypatch.delenv("AKSHARE_EASTMONEY_COOKIE")
+    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
+
+    request_eastmoney(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get", max_retries=1
+    )
+
+    assert "Cookie" not in eastmoney_requests[0][1]["headers"]
+
+
+@pytest.mark.parametrize("header_name", ["Cookie", "cookie"])
+def test_eastmoney_caller_cookie_header_takes_precedence(
+    monkeypatch, eastmoney_requests, header_name
+):
+    from akshare.utils.request import request_eastmoney
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", "cached=session")
+    request_eastmoney(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+        headers={header_name: "caller=session"},
+        max_retries=1,
+    )
+
+    assert eastmoney_requests[0][1]["headers"]["Cookie"] == "caller=session"
+
+
+def test_eastmoney_caller_cookie_jar_takes_precedence(monkeypatch, eastmoney_requests):
+    from akshare.utils.request import request_eastmoney
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", "cached=session")
+    request_eastmoney(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+        cookies={"caller": "session"},
+        max_retries=1,
+    )
+
+    assert "Cookie" not in eastmoney_requests[0][1]["headers"]
+    assert eastmoney_requests[0][1]["cookies"] == {"caller": "session"}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://push2his.eastmoney.com/api/qt/stock/kline/get",
+        "https://example.test/api/qt/stock/kline/get",
+        "https://push2his.eastmoney.com.example.test/api/qt/stock/kline/get",
+        "https://example.test\\@push2his.eastmoney.com/api/qt/stock/kline/get",
+        "https://example.test\\@7.push2his.eastmoney.com/api/qt/stock/kline/get",
+    ],
+)
+def test_eastmoney_cookie_is_not_sent_to_untrusted_urls(
+    monkeypatch, eastmoney_requests, url
+):
+    from akshare.utils.request import request_eastmoney
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", "verified=session")
+    request_eastmoney(url, max_retries=1)
+
+    assert "Cookie" not in eastmoney_requests[0][1]["headers"]
+
+
+@pytest.mark.parametrize(
+    "cookie", ["must-not-leak\nX-Test: value", "must-not-leak\rX-Test: value"]
+)
+def test_eastmoney_rejects_multiline_cookies_without_exposing_values(
+    monkeypatch, cookie
+):
+    from akshare.utils.request import request_eastmoney
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", cookie)
+    with pytest.raises(ValueError, match="single-line") as exc:
+        request_eastmoney("https://push2his.eastmoney.com/api/qt/stock/kline/get")
+    assert "must-not-leak" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "headers", [{"cookie": "verified=session"}, {"authorization": "private-token"}]
+)
+def test_eastmoney_credentials_are_not_exposed_to_curl(monkeypatch, headers):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    calls = []
+
+    def fake_get(candidate, **kwargs):
+        calls.append(candidate)
+        if candidate == url:
+            raise requests.ConnectionError("temporary disconnect")
+        return SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def unexpected_curl(*args, **kwargs):
+        pytest.fail("credentials must not be passed through subprocess arguments")
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_INTERFACE", "en0")
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(request_utils.subprocess, "run", unexpected_curl)
+
+    request_utils.request_eastmoney(url, headers=headers, max_retries=1)
+    assert calls == [url, "https://push2delay.eastmoney.com/api/qt/stock/kline/get"]
+
+
+def test_eastmoney_verified_session_rechecks_failed_primary(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    calls = []
+
+    def fake_get(candidate, **kwargs):
+        calls.append(candidate)
+        if len(calls) == 1:
+            raise requests.ConnectionError("anonymous request failed")
+        return SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    request_utils.request_eastmoney(url, max_retries=1)
+    monkeypatch.setenv("AKSHARE_EASTMONEY_COOKIE", "verified=session")
+    request_utils.request_eastmoney(url, max_retries=1)
+
+    assert calls == [
+        url,
+        "https://push2delay.eastmoney.com/api/qt/stock/kline/get",
+        url,
+    ]
 
 
 def test_eastmoney_fallback_urls_replace_push2_hosts():
@@ -169,6 +384,259 @@ def test_request_eastmoney_tries_curl_interface_before_push2his_delay(monkeypatc
     assert not any("push2delay.eastmoney.com" in item for item in called_urls)
 
 
+def test_eastmoney_curl_success_remains_available_on_later_calls(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    called_urls = []
+    called_curl = []
+    response = SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def fake_get(candidate, **kwargs):
+        called_urls.append(candidate)
+        raise requests.ConnectionError("primary connection failed")
+
+    def fake_curl(candidate, **kwargs):
+        called_curl.append(candidate)
+        return response
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_INTERFACE", "en0")
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(
+        request_utils, "_request_eastmoney_with_curl_interface", fake_curl
+    )
+
+    for _ in range(2):
+        assert request_utils.request_eastmoney(url, max_retries=1) is response
+
+    assert called_urls == [url, url]
+    assert called_curl == [url, url]
+
+
+def test_eastmoney_primary_retry_success_is_not_cached_as_failure(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    called_urls = []
+    response = SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def fake_get(candidate, **kwargs):
+        called_urls.append(candidate)
+        if len(called_urls) == 1:
+            raise requests.ConnectionError("temporary disconnect")
+        return response
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(request_utils.time, "sleep", lambda _: None)
+
+    assert request_utils.request_eastmoney(url, max_retries=2) is response
+    assert request_utils.request_eastmoney(url, max_retries=1) is response
+    assert called_urls == [url, url, url]
+
+
+def test_eastmoney_cached_fallback_failure_retries_primary(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    fallback = "https://push2delay.eastmoney.com/api/qt/clist/get"
+    called_urls = []
+    response = SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def fake_get(candidate, **kwargs):
+        called_urls.append(candidate)
+        if len(called_urls) in (1, 3):
+            raise requests.ConnectionError("temporary disconnect")
+        return response
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+
+    for _ in range(2):
+        assert request_utils.request_eastmoney(url, max_retries=1) is response
+
+    assert called_urls == [url, fallback, fallback, url]
+
+
+def test_eastmoney_failed_primary_is_rechecked_after_cooldown(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    fallback = "https://push2delay.eastmoney.com/api/qt/clist/get"
+    called_urls = []
+    response = SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+    clock = [0.0]
+
+    def fake_get(candidate, **kwargs):
+        called_urls.append(candidate)
+        if len(called_urls) == 1:
+            raise requests.ConnectionError("temporary disconnect")
+        return response
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(request_utils.time, "monotonic", lambda: clock[0])
+
+    assert request_utils.request_eastmoney(url, max_retries=1) is response
+    clock[0] = 30.0
+    assert request_utils.request_eastmoney(url, max_retries=1) is response
+    clock[0] = 61.0
+    assert request_utils.request_eastmoney(url, max_retries=1) is response
+    assert called_urls == [url, fallback, fallback, url]
+
+
+def test_eastmoney_failure_cache_does_not_affect_other_endpoints(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    fallback = "https://push2delay.eastmoney.com/api/qt/clist/get"
+    other_url = "https://push2.eastmoney.com/api/qt/stock/get"
+    called_urls = []
+    response = SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def fake_get(candidate, **kwargs):
+        called_urls.append(candidate)
+        if len(called_urls) == 1:
+            raise requests.ConnectionError("temporary disconnect")
+        return response
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+
+    assert request_utils.request_eastmoney(url, max_retries=1) is response
+    assert request_utils.request_eastmoney(other_url, max_retries=1) is response
+    assert called_urls == [url, fallback, other_url]
+
+
+def test_eastmoney_total_failure_does_not_poison_primary(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    fallback = "https://push2delay.eastmoney.com/api/qt/clist/get"
+    called_urls = []
+    response = SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def fake_get(candidate, **kwargs):
+        called_urls.append(candidate)
+        if len(called_urls) <= 2:
+            raise requests.ConnectionError("network unavailable")
+        return response
+
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+
+    with pytest.raises(requests.ConnectionError, match="network unavailable"):
+        request_utils.request_eastmoney(url, max_retries=1)
+    assert request_utils.request_eastmoney(url, max_retries=1) is response
+    assert called_urls == [url, fallback, url]
+
+
+@pytest.mark.parametrize(
+    "failure", [subprocess.TimeoutExpired("curl", 1), OSError("curl unavailable")]
+)
+def test_eastmoney_curl_process_failure_continues_to_fallback(monkeypatch, failure):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    fallback = "https://push2delay.eastmoney.com/api/qt/stock/kline/get"
+    called_urls = []
+    response = SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def fake_get(candidate, **kwargs):
+        called_urls.append(candidate)
+        if candidate == url:
+            raise requests.ConnectionError("primary connection failed")
+        return response
+
+    def fake_run(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_INTERFACE", "en0")
+    monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_BIN", "curl")
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(request_utils.subprocess, "run", fake_run)
+
+    assert request_utils.request_eastmoney(url, timeout=1, max_retries=1) is response
+    assert called_urls == [url, fallback]
+
+
+@pytest.mark.parametrize("timeout, effective_timeout", [(None, 15), (0.5, 0.5)])
+def test_eastmoney_curl_process_has_bounded_timeout(
+    monkeypatch, timeout, effective_timeout
+):
+    import akshare.utils.request as request_utils
+
+    def fake_run(command, **kwargs):
+        assert command[command.index("--max-time") + 1] == str(effective_timeout)
+        assert kwargs["timeout"] == effective_timeout + 1
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"klines":[]}}\nAKSHARE_HTTP_STATUS:200',
+            stderr="",
+        )
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_BIN", "curl")
+    monkeypatch.setattr(request_utils.subprocess, "run", fake_run)
+
+    response = request_utils._request_eastmoney_with_curl_interface(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+        params={"secid": "0.000001"},
+        headers={},
+        timeout=timeout,
+        interface="en0",
+    )
+    assert response.json() == {"data": {"klines": []}}
+
+
+@pytest.mark.parametrize(
+    "options", [{"stream": True}, {"proxies": {}}, {"verify": True}, {"cookies": {}}]
+)
+def test_eastmoney_curl_does_not_discard_request_options(monkeypatch, options):
+    import akshare.utils.request as request_utils
+
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    fallback = "https://push2delay.eastmoney.com/api/qt/stock/kline/get"
+    called_urls = []
+    response = SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    def fake_get(candidate, **kwargs):
+        called_urls.append(candidate)
+        for key, value in options.items():
+            assert kwargs[key] == value
+        if candidate == url:
+            raise requests.ConnectionError("primary connection failed")
+        return response
+
+    def unexpected_curl(*args, **kwargs):
+        pytest.fail("curl does not support these request options")
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_INTERFACE", "en0")
+    monkeypatch.setattr(request_utils.requests, "get", fake_get)
+    monkeypatch.setattr(
+        request_utils, "_request_eastmoney_with_curl_interface", unexpected_curl
+    )
+
+    assert request_utils.request_eastmoney(url, max_retries=1, **options) is response
+    assert called_urls == [url, fallback]
+
+
+def test_eastmoney_curl_exit_timeout_raises_requests_timeout(monkeypatch):
+    import akshare.utils.request as request_utils
+
+    monkeypatch.setenv("AKSHARE_EASTMONEY_CURL_BIN", "curl")
+    monkeypatch.setattr(
+        request_utils.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=28, stderr="operation timed out"
+        ),
+    )
+
+    with pytest.raises(requests.Timeout, match="operation timed out"):
+        request_utils._request_eastmoney_with_curl_interface(
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+            params=None,
+            headers={},
+            timeout=1,
+            interface="en0",
+        )
+
+
 def test_request_szse_uses_curl_interface_and_preserves_binary(monkeypatch):
     import akshare.utils.request as request_utils
     from akshare.utils.request import request_szse
@@ -277,6 +745,183 @@ def test_request_szse_uses_host_specific_resolved_cdn_ip(monkeypatch):
     assert response.json()["data"] == [{"code": "10000001"}]
     assert "--resolve" in called_curl[1]
     assert "investor.szse.cn:443:58.251.50.138" in called_curl[1]
+
+
+def test_stock_zh_a_spot_batches_same_source_quotes_and_preserves_schema(monkeypatch):
+    import pandas as pd
+    from akshare.stock_feature import stock_hist_em
+
+    codes = [f"{i:06}" for i in range(1, 501)] + [
+        "600519",
+        "300750",
+        "920001",
+        "000001",
+    ]
+    batches = []
+    monkeypatch.setattr(
+        stock_hist_em, "stock_info_a_code_name", lambda: pd.DataFrame({"code": codes})
+    )
+    monkeypatch.setattr(stock_hist_em.time, "sleep", lambda _: None)
+
+    def fake_request(url, params, **kwargs):
+        assert url == "https://push2.eastmoney.com/api/qt/ulist.np/get"
+        batch = params["secids"].split(",")
+        batches.append(batch)
+        rows = []
+        for secid in batch:
+            market, code = secid.split(".")
+            row = {f"f{i}": str(i) for i in range(1, 26)}
+            row.update(
+                {
+                    "f12": code,
+                    "f13": int(market),
+                    "f14": "东财" + code,
+                    "f2": "-" if code == "000001" else "11.65",
+                    "f3": "-" if code == "000001" else code[-3:],
+                    "f99999": "ignored",
+                }
+            )
+            rows.append(dict(reversed(list(row.items()))))
+        return SimpleNamespace(json=lambda: {"data": {"diff": rows}})
+
+    monkeypatch.setattr(stock_hist_em, "request_eastmoney", fake_request)
+    result = stock_hist_em.stock_zh_a_spot_em()
+
+    assert [len(batch) for batch in batches] == [500, 3]
+    assert batches[1] == ["1.600519", "0.300750", "0.920001"]
+    assert len(result) == result["代码"].nunique() == 503
+    assert result["序号"].tolist() == list(range(1, 504))
+    assert result["涨跌幅"].dropna().is_monotonic_decreasing
+    assert result.iloc[-1]["代码"] == "000001"
+    assert pd.isna(result.iloc[-1]["最新价"])
+    assert result.loc[result["代码"] == "600519", "名称"].item() == "东财600519"
+    assert result.loc[result["代码"] == "600519", "成交量"].item() == 5
+    assert result.loc[result["代码"] == "600519", "最新价"].item() == 11.65
+    assert list(result.columns) == [
+        "序号",
+        "代码",
+        "名称",
+        "最新价",
+        "涨跌幅",
+        "涨跌额",
+        "成交量",
+        "成交额",
+        "振幅",
+        "最高",
+        "最低",
+        "今开",
+        "昨收",
+        "量比",
+        "换手率",
+        "市盈率-动态",
+        "市净率",
+        "总市值",
+        "流通市值",
+        "涨速",
+        "5分钟涨跌",
+        "60日涨跌幅",
+        "年初至今涨跌幅",
+    ]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        None,
+        {"diff": []},
+        {"diff": [{"f12": "000001", "f13": 0}]},
+        {"diff": [{"f12": "000001", "f13": 0}, {"f12": "000001", "f13": 0}]},
+    ],
+)
+def test_stock_zh_a_spot_rejects_incomplete_quote_batches(monkeypatch, data):
+    import pandas as pd
+    from akshare.stock_feature import stock_hist_em
+
+    monkeypatch.setattr(
+        stock_hist_em,
+        "stock_info_a_code_name",
+        lambda: pd.DataFrame({"code": ["000001", "600519"]}),
+    )
+    monkeypatch.setattr(
+        stock_hist_em,
+        "request_eastmoney",
+        lambda *args, **kwargs: SimpleNamespace(json=lambda: {"data": data}),
+    )
+
+    with pytest.raises(RuntimeError, match="incomplete A-share quote batch"):
+        stock_hist_em.stock_zh_a_spot_em()
+
+
+def test_stock_zh_a_spot_rejects_empty_security_list(monkeypatch):
+    import pandas as pd
+    from akshare.stock_feature import stock_hist_em
+
+    monkeypatch.setattr(
+        stock_hist_em, "stock_info_a_code_name", lambda: pd.DataFrame({"code": []})
+    )
+    with pytest.raises(RuntimeError, match="security list is empty"):
+        stock_hist_em.stock_zh_a_spot_em()
+
+
+@pytest.mark.parametrize("fail_second_page", [False, True])
+def test_bse_security_roster_uses_bounded_session_and_keeps_first_page(
+    monkeypatch, fail_second_page
+):
+    import json
+    from akshare.stock import stock_info
+
+    calls = []
+    closed = []
+    stock_info.stock_info_bj_name_code.cache_clear()
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            closed.append(True)
+
+        def mount(self, prefix, adapter):
+            assert prefix == "https://www.bse.cn/"
+            assert adapter.max_retries.total == 2
+            assert adapter.max_retries.allowed_methods == frozenset({"POST"})
+
+        def post(self, url, data, headers, timeout):
+            assert url == "https://www.bse.cn/nqxxController/nqxxCnzq.do"
+            assert timeout == 10
+            assert "Cookie" not in headers
+            page = int(data["page"])
+            calls.append(page)
+            if page == 1 and fail_second_page:
+                raise requests.ConnectionError("roster page failed")
+            row = {f"field{i}": "" for i in range(48)}
+            row.update(
+                {
+                    "field0": "2026-01-01",
+                    "field22": "2026-10-19",
+                    "field38": f"92000{page + 1}",
+                    "field40": f"证券{page + 1}",
+                }
+            )
+            payload = [{"totalPages": 2, "content": [row]}]
+            return SimpleNamespace(
+                text="(" + json.dumps(payload) + ")", raise_for_status=lambda: None
+            )
+
+    monkeypatch.setattr(stock_info.requests, "Session", FakeSession)
+    try:
+        if fail_second_page:
+            with pytest.raises(requests.ConnectionError, match="roster page failed"):
+                stock_info.stock_info_bj_name_code()
+            assert stock_info.stock_info_bj_name_code.cache_info().currsize == 0
+        else:
+            result = stock_info.stock_info_bj_name_code()
+            assert result["证券代码"].tolist() == ["920001", "920002"]
+            assert result["证券简称"].tolist() == ["证券1", "证券2"]
+        assert calls == [0, 1]
+        assert closed == [True]
+    finally:
+        stock_info.stock_info_bj_name_code.cache_clear()
 
 
 def test_stock_zh_a_hist_returns_empty_when_eastmoney_klines_empty(monkeypatch):
@@ -439,7 +1084,9 @@ def test_stock_sector_fund_flow_rank_uses_request_eastmoney(monkeypatch):
     def fake_requests_get(*args, **kwargs):
         raise requests.ConnectionError("primary endpoint should use fallback helper")
 
-    monkeypatch.setattr(stock_fund_em, "request_eastmoney", fake_request_eastmoney, raising=False)
+    monkeypatch.setattr(
+        stock_fund_em, "request_eastmoney", fake_request_eastmoney, raising=False
+    )
     monkeypatch.setattr(stock_fund_em.requests, "get", fake_requests_get)
 
     result = stock_fund_em.stock_sector_fund_flow_rank(
@@ -472,7 +1119,9 @@ def test_stock_fund_flow_klines_use_request_eastmoney(monkeypatch):
     def fake_requests_get(*args, **kwargs):
         raise requests.ConnectionError("primary endpoint should use fallback helper")
 
-    monkeypatch.setattr(stock_fund_em, "request_eastmoney", fake_request_eastmoney, raising=False)
+    monkeypatch.setattr(
+        stock_fund_em, "request_eastmoney", fake_request_eastmoney, raising=False
+    )
     monkeypatch.setattr(stock_fund_em.requests, "get", fake_requests_get)
 
     result = stock_fund_em._get_eastmoney_fund_flow_klines(
@@ -506,11 +1155,7 @@ def test_futures_hist_em_uses_request_eastmoney(monkeypatch):
         return SimpleNamespace(
             status_code=200,
             text='{"data":{"klines":["2024-06-03,1,2,3,4,5,6,0,7,8,0,0,9,0"]}}',
-            json=lambda: {
-                "data": {
-                    "klines": ["2024-06-03,1,2,3,4,5,6,0,7,8,0,0,9,0"]
-                }
-            },
+            json=lambda: {"data": {"klines": ["2024-06-03,1,2,3,4,5,6,0,7,8,0,0,9,0"]}},
         )
 
     def fake_requests_get(*args, **kwargs):
@@ -535,6 +1180,67 @@ def test_futures_hist_em_uses_request_eastmoney(monkeypatch):
     assert len(result) == 1
     assert result.loc[0, "收盘"] == 2
     assert called_urls == ["https://push2his.eastmoney.com/api/qt/stock/kline/get"]
+
+
+def test_futures_global_hist_uses_request_eastmoney(monkeypatch):
+    from akshare.futures import futures_hf_em
+
+    called_urls = []
+
+    def fake_request(url, **kwargs):
+        called_urls.append(url)
+        assert kwargs["params"]["secid"] == "101.HG00Y"
+        return SimpleNamespace(
+            json=lambda: {
+                "data": {
+                    "code": "HG00Y",
+                    "name": "COMEX铜",
+                    "klines": ["2026-10-09,1,2,3,4,5,6,0,7,8,0,0,9,4294967295"],
+                }
+            }
+        )
+
+    def fake_get(*args, **kwargs):
+        raise requests.ConnectionError("must use the shared request helper")
+
+    monkeypatch.setattr(futures_hf_em, "request_eastmoney", fake_request, raising=False)
+    monkeypatch.setattr(futures_hf_em.requests, "get", fake_get)
+
+    result = futures_hf_em.futures_global_hist_em(symbol="HG00Y")
+
+    assert called_urls == ["https://push2his.eastmoney.com/api/qt/stock/kline/get"]
+    assert result.loc[0, "最新价"] == 2
+    assert result.loc[0, "代码"] == "HG00Y"
+    assert result.loc[0, "日增"] == -1
+    assert list(result.columns) == [
+        "日期",
+        "代码",
+        "名称",
+        "开盘",
+        "最新价",
+        "最高",
+        "最低",
+        "总量",
+        "涨幅",
+        "持仓",
+        "日增",
+    ]
+
+
+@pytest.mark.parametrize("data", [None, {"klines": []}])
+def test_futures_global_hist_returns_empty_for_missing_klines(monkeypatch, data):
+    from akshare.futures import futures_hf_em
+
+    response = SimpleNamespace(json=lambda: {"data": data})
+    monkeypatch.setattr(
+        futures_hf_em,
+        "request_eastmoney",
+        lambda *args, **kwargs: response,
+        raising=False,
+    )
+    monkeypatch.setattr(futures_hf_em.requests, "get", lambda *args, **kwargs: response)
+
+    assert futures_hf_em.futures_global_hist_em(symbol="HG00Y").empty
 
 
 def test_stock_hsgt_hold_stock_returns_empty_when_result_missing(monkeypatch):
@@ -584,7 +1290,9 @@ def test_stock_gpzy_bank_returns_empty_when_result_missing(monkeypatch):
         def json(self):
             return {"success": False, "result": None, "message": "返回数据为空"}
 
-    monkeypatch.setattr(stock_gpzy_em.requests, "get", lambda *args, **kwargs: EmptyResponse())
+    monkeypatch.setattr(
+        stock_gpzy_em.requests, "get", lambda *args, **kwargs: EmptyResponse()
+    )
 
     result = stock_gpzy_em.stock_gpzy_distribute_statistics_bank_em()
 
@@ -657,7 +1365,9 @@ def test_stock_szse_area_summary_uses_request_szse(monkeypatch):
         return SimpleNamespace(content=payload.getvalue())
 
     def fake_requests_get(*args, **kwargs):
-        raise requests.ConnectionError("primary endpoint should use SZSE fallback helper")
+        raise requests.ConnectionError(
+            "primary endpoint should use SZSE fallback helper"
+        )
 
     monkeypatch.setattr(stock_summary, "request_szse", fake_request_szse, raising=False)
     monkeypatch.setattr(stock_summary.requests, "get", fake_requests_get)

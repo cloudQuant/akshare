@@ -6,11 +6,15 @@ Desc: 东方财富网-行情首页-沪深京 A 股
 https://quote.eastmoney.com/
 """
 
+import time
+
 import pandas as pd
 import requests
 
+from akshare.stock.stock_info import stock_info_a_code_name
 from akshare.utils.func import fetch_paginated_data
 from akshare.utils.request import request_eastmoney
+from akshare.utils.tqdm import get_tqdm
 
 
 def _get_eastmoney_json(url: str, params: dict, endpoint_name: str):
@@ -38,56 +42,64 @@ def stock_zh_a_spot_em() -> pd.DataFrame:
     :return: 实时行情
     :rtype: pandas.DataFrame
     """
-    url = "https://82.push2.eastmoney.com/api/qt/clist/get"
+    url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
     params = {
-        "pn": "1",
-        "pz": "100",
-        "po": "1",
-        "np": "1",
         "ut": "bd1d9ddb04089700cf9c27f6f7426281",
         "fltt": "2",
         "invt": "2",
-        "fid": "f12",
-        "fs": "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048",
         "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,"
         "f20,f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
     }
-    temp_df = fetch_paginated_data(url, params)
-    temp_df.columns = [
-        "index",
-        "_",
-        "最新价",
-        "涨跌幅",
-        "涨跌额",
-        "成交量",
-        "成交额",
-        "振幅",
-        "换手率",
-        "市盈率-动态",
-        "量比",
-        "5分钟涨跌",
-        "代码",
-        "_",
-        "名称",
-        "最高",
-        "最低",
-        "今开",
-        "昨收",
-        "总市值",
-        "流通市值",
-        "涨速",
-        "市净率",
-        "60日涨跌幅",
-        "年初至今涨跌幅",
-        "-",
-        "-",
-        "-",
-        "-",
-        "-",
-        "-",
-        "-",
-    ]
-    temp_df.rename(columns={"index": "序号"}, inplace=True)
+    codes = stock_info_a_code_name()["code"].drop_duplicates()
+    secids = [f"{1 if code.startswith('6') else 0}.{code}" for code in codes]
+    if not secids:
+        raise RuntimeError("A-share security list is empty")
+    records = []
+    batch_size = 500
+    tqdm = get_tqdm()
+    for start in tqdm(range(0, len(secids), batch_size), leave=False):
+        if start:
+            time.sleep(0.5)
+        batch = secids[start : start + batch_size]
+        params["secids"] = ",".join(batch)
+        response = request_eastmoney(url, params=params, timeout=15)
+        data_json = response.json()
+        diff = (data_json.get("data") or {}).get("diff") or []
+        returned_secids = {f"{row['f13']}.{row['f12']}" for row in diff}
+        if len(diff) != len(batch) or returned_secids != set(batch):
+            raise RuntimeError("Eastmoney returned an incomplete A-share quote batch")
+        records.extend(diff)
+    temp_df = pd.DataFrame(records)
+    temp_df["f3"] = pd.to_numeric(temp_df["f3"], errors="coerce")
+    temp_df.sort_values("f3", ascending=False, inplace=True, ignore_index=True)
+    temp_df.insert(0, "序号", range(1, len(temp_df) + 1))
+    temp_df.rename(
+        columns={
+            "f2": "最新价",
+            "f3": "涨跌幅",
+            "f4": "涨跌额",
+            "f5": "成交量",
+            "f6": "成交额",
+            "f7": "振幅",
+            "f8": "换手率",
+            "f9": "市盈率-动态",
+            "f10": "量比",
+            "f11": "5分钟涨跌",
+            "f12": "代码",
+            "f14": "名称",
+            "f15": "最高",
+            "f16": "最低",
+            "f17": "今开",
+            "f18": "昨收",
+            "f20": "总市值",
+            "f21": "流通市值",
+            "f22": "涨速",
+            "f23": "市净率",
+            "f24": "60日涨跌幅",
+            "f25": "年初至今涨跌幅",
+        },
+        inplace=True,
+    )
     temp_df = temp_df[
         [
             "序号",

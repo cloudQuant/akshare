@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import time
+from pathlib import Path
 from typing import Dict, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
@@ -26,7 +27,8 @@ _EASTMONEY_HEADERS = {
     "Referer": "https://quote.eastmoney.com/",
     "Accept": "application/json,text/plain,*/*",
 }
-_EASTMONEY_FAILED_HOSTS: set[str] = set()
+_EASTMONEY_FAILED_HOSTS: dict[tuple[str, str], float] = {}
+_EASTMONEY_FAILURE_COOLDOWN = 60.0
 _SZSE_FAILED_HOSTS: set[str] = set()
 _SZSE_HOST = "www.szse.cn"
 _SZSE_DEFAULT_RESOLVE_IPS = ("113.108.107.138",)
@@ -40,6 +42,24 @@ _DEFAULT_BROWSER_UA = "Mozilla/5.0"
 
 def _reset_eastmoney_fallback_cache() -> None:
     _EASTMONEY_FAILED_HOSTS.clear()
+
+
+def _get_eastmoney_cookie() -> str:
+    cookie = os.environ.get("AKSHARE_EASTMONEY_COOKIE")
+    if cookie is None:
+        configured_path = os.environ.get("AKSHARE_EASTMONEY_COOKIE_FILE")
+        cookie_path = (
+            Path(configured_path).expanduser()
+            if configured_path
+            else Path.home() / ".cache" / "akshare" / "eastmoney_cookie.txt"
+        )
+        if not configured_path and not cookie_path.exists():
+            return ""
+        cookie = cookie_path.read_text(encoding="utf-8")
+    cookie = cookie.strip()
+    if "\r" in cookie or "\n" in cookie:
+        raise ValueError("Eastmoney Cookie must be a single-line HTTP header value")
+    return cookie
 
 
 def _eastmoney_curl_interface() -> str:
@@ -75,7 +95,9 @@ def _szse_resolve_ips(host: str = _SZSE_HOST) -> list[str]:
     if raw is not None:
         if raw.strip().lower() in {"0", "false", "no", "off"}:
             return []
-        return [item.strip() for item in raw.replace(";", ",").split(",") if item.strip()]
+        return [
+            item.strip() for item in raw.replace(";", ",").split(",") if item.strip()
+        ]
     if os.environ.get("AKSHARE_SZSE_AUTO_RESOLVE", "1").lower() in {
         "0",
         "false",
@@ -92,9 +114,7 @@ def _request_hostname(url: str) -> str:
 
 def _is_push2his_url(url: str) -> bool:
     host = urlsplit(url).netloc.lower()
-    return host == "push2his.eastmoney.com" or host.endswith(
-        ".push2his.eastmoney.com"
-    )
+    return host == "push2his.eastmoney.com" or host.endswith(".push2his.eastmoney.com")
 
 
 def _eastmoney_failed_host_key(host: str) -> str:
@@ -121,7 +141,8 @@ def _request_eastmoney_with_curl_interface(
     if not curl_bin:
         raise requests.ConnectionError("curl executable not found")
     prepared_url = _prepared_get_url(url, params)
-    max_time = str(timeout if timeout is not None else 15)
+    effective_timeout = timeout if timeout is not None else 15
+    max_time = str(effective_timeout)
     marker = "AKSHARE_HTTP_STATUS:"
     command = [
         curl_bin,
@@ -144,7 +165,16 @@ def _request_eastmoney_with_curl_interface(
         if key in {"User-Agent", "Referer"}:
             continue
         command[-1:-1] = ["-H", f"{key}: {value}"]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=effective_timeout + 1
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise requests.Timeout("Eastmoney curl request timed out") from exc
+    except OSError as exc:
+        raise requests.ConnectionError("could not execute curl") from exc
+    if result.returncode == 28:
+        raise requests.Timeout(result.stderr.strip() or "curl request timed out")
     if result.returncode != 0:
         raise requests.ConnectionError(result.stderr.strip() or "curl request failed")
     body, separator, status_text = result.stdout.rpartition(marker)
@@ -333,16 +363,34 @@ def request_eastmoney(
     max_retries: int = 2,
     **kwargs,
 ) -> requests.Response:
-    """Request Eastmoney push APIs, falling back to push2delay when needed."""
-    request_headers = _EASTMONEY_HEADERS.copy()
+    """Request Eastmoney push APIs with an optional verified website session."""
+    request_headers = requests.structures.CaseInsensitiveDict(_EASTMONEY_HEADERS)
     if headers:
         request_headers.update(headers)
+    parts = urlsplit(_prepared_get_url(url, None))
+    primary_host_key = _eastmoney_failed_host_key(parts.hostname or "")
+    if (
+        parts.scheme == "https"
+        and primary_host_key in (*_EASTMONEY_PUSH_HOSTS, _EASTMONEY_DELAY_HOST)
+        and "Cookie" not in request_headers
+        and "cookies" not in kwargs
+    ):
+        cookie = _get_eastmoney_cookie()
+        if cookie:
+            request_headers["Cookie"] = cookie
+    has_cookie = "Cookie" in request_headers or "cookies" in kwargs
     last_exception = None
     urls = eastmoney_fallback_urls(url)
-    primary_host = urlsplit(url).netloc.lower()
-    primary_host_key = _eastmoney_failed_host_key(primary_host)
-    if primary_host_key in _EASTMONEY_FAILED_HOSTS and len(urls) > 1:
-        urls = urls[1:]
+    cache_key = (primary_host_key, parts.path)
+    if (
+        not has_cookie
+        and _EASTMONEY_FAILED_HOSTS.get(cache_key, 0) > time.monotonic()
+        and len(urls) > 1
+    ):
+        urls = urls[1:] + urls[:1]
+    else:
+        _EASTMONEY_FAILED_HOSTS.pop(cache_key, None)
+    primary_failed = False
     for candidate_url in urls:
         for attempt in range(max_retries):
             try:
@@ -354,25 +402,41 @@ def request_eastmoney(
                     **kwargs,
                 )
                 response.raise_for_status()
+                if candidate_url == url:
+                    _EASTMONEY_FAILED_HOSTS.pop(cache_key, None)
+                elif primary_failed:
+                    # Only prefer a proven fallback, without indefinitely extending its TTL.
+                    _EASTMONEY_FAILED_HOSTS[cache_key] = (
+                        time.monotonic() + _EASTMONEY_FAILURE_COOLDOWN
+                    )
                 return response
             except requests.RequestException as exc:
                 last_exception = exc
                 if candidate_url == url and len(urls) > 1:
-                    _EASTMONEY_FAILED_HOSTS.add(primary_host_key)
+                    primary_failed = True
                     interface = _eastmoney_curl_interface()
-                    if interface and _is_push2his_url(candidate_url):
+                    if (
+                        interface
+                        and _is_push2his_url(candidate_url)
+                        and not kwargs
+                        and not has_cookie
+                        and "Authorization" not in request_headers
+                    ):
                         try:
-                            return _request_eastmoney_with_curl_interface(
+                            response = _request_eastmoney_with_curl_interface(
                                 candidate_url,
                                 params=params,
                                 headers=request_headers,
                                 timeout=timeout,
                                 interface=interface,
                             )
+                            _EASTMONEY_FAILED_HOSTS.pop(cache_key, None)
+                            return response
                         except requests.RequestException as curl_exc:
                             last_exception = curl_exc
                 if attempt < max_retries - 1:
                     time.sleep(0.2 * (attempt + 1))
+    _EASTMONEY_FAILED_HOSTS.pop(cache_key, None)
     if last_exception is not None:
         raise last_exception
     return requests.get(

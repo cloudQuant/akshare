@@ -12,6 +12,7 @@ from typing import Optional
 import pandas as pd
 import requests
 
+from akshare.utils.request import request_eastmoney
 from akshare.utils.tqdm import get_tqdm
 
 
@@ -191,9 +192,12 @@ def futures_global_hist_em(symbol: str = "HG00Y") -> pd.DataFrame:
         "ut": "f057cbcbce2a86e2866ab8877db1d059",
         "forcect": "1",
     }
-    r = requests.get(url, params=params)
+    r = request_eastmoney(url, params=params, timeout=15)
     data_json = r.json()
-    temp_df = pd.DataFrame([item.split(",") for item in data_json["data"]["klines"]])
+    klines = (data_json.get("data") or {}).get("klines") or []
+    if not klines:
+        return pd.DataFrame()
+    temp_df = pd.DataFrame([item.split(",") for item in klines])
     temp_df["code"] = data_json["data"]["code"]
     temp_df["name"] = data_json["data"]["name"]
     temp_df.columns = [

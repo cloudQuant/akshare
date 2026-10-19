@@ -13,6 +13,8 @@ from io import StringIO
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from akshare.utils.request import request_szse
 from akshare.utils.tqdm import get_tqdm
@@ -211,20 +213,29 @@ def stock_info_bj_name_code() -> pd.DataFrame:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/110.0.0.0 Safari/537.36"
     }
-    r = requests.post(url, data=payload, headers=headers)
-    data_text = r.text
-    data_json = json.loads(data_text[data_text.find("[") : -1])
-    total_page = data_json[0]["totalPages"]
-    big_df = pd.DataFrame()
-    tqdm = get_tqdm()
-    for page in tqdm(range(total_page), leave=False):
-        payload.update({"page": page})
-        r = requests.post(url, data=payload, headers=headers)
+    retry = Retry(
+        total=2,
+        backoff_factor=0.5,
+        allowed_methods=frozenset({"POST"}),
+        status_forcelist=[502, 503, 504],
+    )
+    with requests.Session() as session:
+        session.mount("https://www.bse.cn/", HTTPAdapter(max_retries=retry))
+        r = session.post(url, data=payload, headers=headers, timeout=10)
+        r.raise_for_status()
         data_text = r.text
         data_json = json.loads(data_text[data_text.find("[") : -1])
-        temp_df = data_json[0]["content"]
-        temp_df = pd.DataFrame(temp_df)
-        big_df = pd.concat([big_df, temp_df], ignore_index=True)
+        total_page = data_json[0]["totalPages"]
+        records = list(data_json[0]["content"])
+        tqdm = get_tqdm()
+        for page in tqdm(range(1, total_page), leave=False):
+            payload.update({"page": page})
+            r = session.post(url, data=payload, headers=headers, timeout=10)
+            r.raise_for_status()
+            data_text = r.text
+            data_json = json.loads(data_text[data_text.find("[") : -1])
+            records.extend(data_json[0]["content"])
+    big_df = pd.DataFrame(records)
     big_df.columns = [
         "上市日期",
         "-",
