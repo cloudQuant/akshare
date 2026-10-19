@@ -338,21 +338,29 @@ def get_tx_start_year(symbol: str = "sh000919") -> str:
         "_var": "trend_qfq",
         "r": "0.3506048543943414",
     }
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=20)
     data_text = r.text
     if not demjson.decode(data_text[data_text.find("={") + 1:])["data"]:
         url = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
         params = {
             "_var": "kline_dayqfq",
-            "param": f"{symbol},day,,,320,qfq",
+            # 640 is this endpoint's per-request ceiling and the fallback has to reach the
+            # true listing date, so asking for 320 silently reported a start ~1.3 years late
+            # for Beijing 920xxxx codes and truncated their history.
+            "param": f"{symbol},day,,,640,qfq",
             "r": "0.751892490072597",
         }
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=20)
         data_text = r.text
-        start_date = demjson.decode(data_text[data_text.find("={") + 1:])["data"][
-            symbol
-        ]["day"][0][0]
-        return start_date
+        trends = demjson.decode(data_text[data_text.find("={") + 1:])["data"][symbol]
+        # The qfq request answers under "qfqday" for some boards - Beijing 920xxxx codes
+        # among them - so read the same key ladder stock_zh_a_hist_tx uses instead of
+        # assuming "day", which aborted the whole fetch for those symbols.
+        for key in ("day", "qfqday", "hfqday"):
+            rows = trends.get(key) if isinstance(trends, dict) else None
+            if rows:
+                return rows[0][0]
+        raise KeyError(f"no kline array in response for {symbol}")
     start_date = demjson.decode(data_text[data_text.find("={") + 1:])["data"][0][0]
     return start_date
 
